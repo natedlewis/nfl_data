@@ -1,6 +1,8 @@
 ---
 title: "README.Rmd"
-output: html_document
+author: "Nate Lewis"
+date: "2021-06-09"
+output: github_document
 ---
 
 ```{r setup, include=FALSE}
