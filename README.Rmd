@@ -5,6 +5,13 @@ date: "2021-06-09"
 output: github_document
 ---
 
+```{r}
+library(nflfastR)
+library(tidyverse)
+library(qs)
+```
+
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
