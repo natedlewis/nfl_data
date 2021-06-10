@@ -2,8 +2,7 @@
 games <- read_csv("https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
 
 # function to double games and clean
-clean_games <- function(g)
-{
+clean_games <- function(g){
 g1 <- games %>% 
   rename(team = away_team,
          team_score = away_score,
@@ -49,3 +48,6 @@ g <- bind_rows(g1,g2) %>%
   arrange(gameday, gametime, old_game_id, location)
 return(g)
 }
+
+# clean game data
+games <- clean_games(games)

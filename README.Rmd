@@ -35,3 +35,9 @@ raw_wkly <- calculate_player_stats(pbp, weekly = TRUE) %>%
   progressr::with_progress()
 ```
 
+Load game data
+```{r}
+games <- read_csv("https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
+games <- clean_games(games)
+```
+

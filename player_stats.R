@@ -210,6 +210,7 @@ ovr_rb <- reg_ovr %>%
   relocate(nw_pos_rk, .after = age) %>% 
   mutate(across(where(is.numeric), round, 2))
 
+# wr/te weekly stats
 wr_wkly <- full_wkly %>% 
   filter(position %in% c("WR", "TE"), season == 2020, week <= 17) %>% 
   dplyr::select(tidyselect::any_of(c(
