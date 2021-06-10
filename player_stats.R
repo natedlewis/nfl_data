@@ -30,55 +30,31 @@ rule_footer <- function(x) {
   )
 }
 
+# create temp dfs to avoid joining duplicates
 y1 <- roster %>% select(-team)
 y2 <- ngs_wkly %>% select(-player_name, -team, -position) %>% filter(week != 0)
 y3 <- adv_wkly %>% select(-player_name, -recent_team)
 y4 <- nw_wkly %>% select(-player_name, -recent_team)
 y5 <- inj_wkly %>% select(-full_name, -team_abbr)
+y6 <- games %>% select(team, season, week, game_id, team_coach, opp, opp_coach)
 
-# join additional objects to weekly stats
+# join all additional objects to weekly stats
 full_wkly <- raw_wkly %>% 
   left_join(y1, by = c("player_id", "season")) %>% 
   left_join(y2, by = c("player_id", "week", "season")) %>% 
   left_join(y3, by = c("player_id", "week", "season")) %>% 
   left_join(y4, by = c("player_id", "week", "season")) %>% 
-  left_join(y5, by = c("player_id", "week", "season"))
+  left_join(y5, by = c("player_id", "week", "season")) %>% 
+  left_join(y6, by = c("week", "season", "recent_team" = "team"))
 
-rm(y1, y2, y3, y4, y5)
+# remove stale objects
+rm(y1, y2, y3, y4, y5, y6)
 
-reg_wkly <- full_wkly %>% filter(season == 2020, week <= 17)
+# create objects for regular season games
+reg_wkly <- full_wkly %>% filter(week <= 17)
 
-wr_wkly <- full_wkly %>% 
-  filter(position %in% c("WR", "TE"), season == 2020, week <= 17) %>% 
-  dplyr::select(tidyselect::any_of(c(
-    
-    # id information
-    "player_id", "full_name", "recent_team", "position", "season", "week",
-    
-    # receiving stats
-    "receptions", "targets", "receiving_yards", "receiving_tds", "receiving_fumbles",
-    "receiving_fumbles_lost", "receiving_air_yards", "receiving_yards_after_catch",
-    "receiving_first_downs", "receiving_epa", "receiving_2pt_conversions",
-    
-    # adv/nw stats
-    "rz_tgts", "ez_tgts", "deep_tgts", "rz_rec", "ez_rec",
-    "deep_rec",  "catch_rate", "adot", "rz_rec_rate", "ez_rec_rate", "deep_rec_rate",
-    "rec_td_1", "rec_td_20", "rec_td_50", "nw_fantasy_points", "fantasy_points", "fantasy_points_ppr",
-    
-    # nsg stats
-    "avg_intented_air_yards", "avg_cushion", "percent_share_of_intended_air_yards", "avg_yac", "avg_expected_yac",
-    "avg_yac_above_expectation",
-    
-    # injury status
-    "active_inactive", "game_designation", "injury_type", "started",
-    
-    # snap counts
-    "total_snaps", "offense_snaps", "offense_snap_rate", "special_teams_snaps", "special_teams_snap_rate"
-  )))
-
-# sum weekly to get season stats
-full_ovr <- full_wkly %>%
-  filter(week <= 17) %>% 
+# sum full weekly stats to get totals across full season
+reg_ovr <- reg_wkly %>%
   dplyr::group_by(.data$player_id, season) %>%
   dplyr::summarise(
     season = last(season),
@@ -130,6 +106,7 @@ full_ovr <- full_wkly %>%
     rush_yds = sum(.data$rushing_yards),
     rush_tds = sum(.data$rushing_tds),
     rush_1st = sum(.data$rushing_first_downs),
+    touches = sum(touches),
     big_runs = sum(big_runs),
     in_five_car = sum(in_five_carries),
     in_ten_car = sum(in_ten_carries),
@@ -203,3 +180,61 @@ full_ovr <- full_wkly %>%
   arrange(-fpts) %>% 
   dplyr::mutate(std_pos_rk = 1:n()) %>%
   ungroup()
+
+#qb stats
+ovr_qb <- reg_ovr %>% 
+  filter(position == "QB") %>% 
+  select(player_id, player_name, recent_team, position, age,
+         cmp:int_tds,
+         car:rush_tds, in_five_car,
+         nw_fpts:std_pos_rk) %>% 
+  relocate(nw_pos_rk, .after = age) %>% 
+  mutate(across(where(is.numeric), round, 2))
+
+# wr/te stats
+ovr_wr_te <- reg_ovr %>% 
+  filter(position %in% c("WR", "TE")) %>% 
+  select(player_id, player_name, recent_team, position, age,
+         rec:rec_td_50,
+         nw_fpts:std_pos_rk) %>% 
+  relocate(nw_pos_rk, .after = age) %>% 
+  mutate(across(where(is.numeric), round, 2))
+
+# rb stats
+ovr_rb <- reg_ovr %>% 
+  filter(position == "RB") %>% 
+  select(player_id, player_name, recent_team, position, age,
+         car:combo_yds_150,
+         rec:rec_tds, rz_tgts,
+         nw_fpts:std_pos_rk) %>% 
+  relocate(nw_pos_rk, .after = age) %>% 
+  mutate(across(where(is.numeric), round, 2))
+
+wr_wkly <- full_wkly %>% 
+  filter(position %in% c("WR", "TE"), season == 2020, week <= 17) %>% 
+  dplyr::select(tidyselect::any_of(c(
+    
+    # id information
+    "player_id", "full_name", "recent_team", "position", "season", "week",
+    
+    # receiving stats
+    "receptions", "targets", "receiving_yards", "receiving_tds", "receiving_fumbles",
+    "receiving_fumbles_lost", "receiving_air_yards", "receiving_yards_after_catch",
+    "receiving_first_downs", "receiving_epa", "receiving_2pt_conversions",
+    
+    # adv/nw stats
+    "rz_tgts", "ez_tgts", "deep_tgts", "rz_rec", "ez_rec",
+    "deep_rec",  "catch_rate", "adot", "rz_rec_rate", "ez_rec_rate", "deep_rec_rate",
+    "rec_td_1", "rec_td_20", "rec_td_50", "nw_fantasy_points", "fantasy_points", "fantasy_points_ppr",
+    
+    # nsg stats
+    "avg_intented_air_yards", "avg_cushion", "percent_share_of_intended_air_yards", "avg_yac", "avg_expected_yac",
+    "avg_yac_above_expectation",
+    
+    # injury status
+    "active_inactive", "game_designation", "injury_type", "started",
+    
+    # snap counts
+    "total_snaps", "offense_snaps", "offense_snap_rate", "special_teams_snaps", "special_teams_snap_rate"
+  )))
+
