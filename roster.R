@@ -33,6 +33,4 @@ roster <- bind_rows(roster, rookies) %>%
   arrange(-season, team, position) %>% 
   filter(position %in% c("WR", "TE", "RB", "QB"))
 
-pj_roster <- roster %>% select(-team)
-
 

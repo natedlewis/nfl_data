@@ -29,4 +29,7 @@ names(injuries_cl) <- gsub(x = names(injuries_cl), pattern = "\\.", replacement 
 
 # only distinct
 inj_wkly <- subset(injuries_cl, !duplicated(subset(injuries_cl, select=c(player_id, season, week)))) %>% 
-  select(player_id, season, week, active_inactive:special_teams_snap_rate, age, -position)
+  select(player_id, full_name, team_abbr, season, week, active_inactive:special_teams_snap_rate, age, -position)
+
+# remove stale objetcs
+rm(raw_injuries, injuries_cl)

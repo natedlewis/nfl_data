@@ -31,10 +31,10 @@ rule_footer <- function(x) {
 }
 
 y1 <- roster %>% select(-team)
-y2 <- ngs_wkly %>% select(-player_name, -team) %>% filter(week != 0)
+y2 <- ngs_wkly %>% select(-player_name, -team, -position) %>% filter(week != 0)
 y3 <- adv_wkly %>% select(-player_name, -recent_team)
 y4 <- nw_wkly %>% select(-player_name, -recent_team)
-y5 <- inj_wkly %>% select(-player_name, -team_abbr)
+y5 <- inj_wkly %>% select(-full_name, -team_abbr)
 
 # join additional objects to weekly stats
 full_wkly <- raw_wkly %>% 
@@ -45,6 +45,8 @@ full_wkly <- raw_wkly %>%
   left_join(y5, by = c("player_id", "week", "season"))
 
 rm(y1, y2, y3, y4, y5)
+
+reg_wkly <- full_wkly %>% filter(season == 2020, week <= 17)
 
 wr_wkly <- full_wkly %>% 
   filter(position %in% c("WR", "TE"), season == 2020, week <= 17) %>% 
@@ -75,7 +77,7 @@ wr_wkly <- full_wkly %>%
   )))
 
 # sum weekly to get season stats
-raw_ovr <- full_wkly %>%
+full_ovr <- full_wkly %>%
   filter(week <= 17) %>% 
   dplyr::group_by(.data$player_id, season) %>%
   dplyr::summarise(
@@ -130,7 +132,7 @@ raw_ovr <- full_wkly %>%
     rush_1st = sum(.data$rushing_first_downs),
     big_runs = sum(big_runs),
     in_five_car = sum(in_five_carries),
-    ine_ten_car = sum(in_ten_carries),
+    in_ten_car = sum(in_ten_carries),
     neu_car = sum(neu_carries),
     eff = mean(efficiency, na.rm = TRUE),
     percent_attempts_gte_eight_defenders = mean(percent_attempts_gte_eight_defenders, na.rm = TRUE),
@@ -178,7 +180,11 @@ raw_ovr <- full_wkly %>%
     rec_td_20 = sum(rec_td_20),
     rec_td_50 = sum(rec_td_50),
     
-    # snaps
+    # snaps/st
+    st_td_1 = sum(st_td_1),
+    st_td_10 = sum(st_td_10),
+    st_td_30 = sum(st_td_30),
+    st_td_50 = sum(st_td_50),
     tot_snaps = sum(total_snaps),
     off_snaps = sum(offense_snaps),
     offense_snap_rate = mean(offense_snap_rate),
@@ -197,16 +203,3 @@ raw_ovr <- full_wkly %>%
   arrange(-fpts) %>% 
   dplyr::mutate(std_pos_rk = 1:n()) %>%
   ungroup()
-
-
-    
-
-    
-    # special teams
-    special_teams_tds = sum(.data$special_teams_tds),
-    
-    # fantasy
-    fantasy_points = sum(.data$fantasy_points),
-    fantasy_points_ppr = sum(.data$fantasy_points_ppr)
-  ) %>%
-  dplyr::ungroup()

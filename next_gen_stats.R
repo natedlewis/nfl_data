@@ -17,5 +17,3 @@ ngs_wkly <- ngs %>%
 # filer to totals
 ngs_ovr <- ngs_wkly %>% filter(week == 0) %>% select(-week)
 
-# create frame to join with weekly stats
-pj_ngs <- ngs_wkly %>% select(-player_name, -position, -team) %>% filter(week != 0)
