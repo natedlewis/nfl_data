@@ -264,20 +264,3 @@ nw_wkly <- joined_adv %>%
 # remove stale objects -----------------------------------------------------------
 
 rm(pass, rush, rec, st, joined_adv, ms)
-
-
-pj_adv <- adv_wkly %>% select(-player_name, -recent_team)
-
-adv_ngs <- pj_adv %>% left_join(pj_ngs, by = c("player_id", "season", "week")) %>% 
-  left_join(injuries_cl, by = c("player_id", "season", "week")) %>% 
-  left_join(roster %>% select(-team), by = c("player_id", "season"))
-
-full_wkly <- raw_wkly %>% 
-  left_join(adv_ngs, by = c("player_id", "season", "week"))
-
-select()
-  
-  
-  
-
-adv[10:12, 23:24] <- sapply(adv[10:12, 23:24], function(x) percent(x, accuracy = 1))
