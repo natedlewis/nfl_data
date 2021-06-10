@@ -1,7 +1,9 @@
 # load game data
 games <- read_csv("https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
 
-# clean game data
+# function to double games and clean
+clean_games <- function(g)
+{
 g1 <- games %>% 
   rename(team = away_team,
          team_score = away_score,
@@ -31,8 +33,7 @@ g2 <- games %>%
          opp_spread_odds = away_spread_odds,           
          team_coach = home_coach,opp_coach = away_coach)
 
-games <- bind_rows(g1,g2) %>% 
-  arrange(gameday, gametime, old_game_id, location) %>% 
+g <- bind_rows(g1,g2) %>% 
   mutate(
     team = case_when(
       team == 'OAK' ~ 'LV',
@@ -44,6 +45,7 @@ games <- bind_rows(g1,g2) %>%
       opp == 'OAK' ~ 'LV',
       opp == 'SD' ~ 'LAC',
       opp == 'STL' ~ 'LA',
-      TRUE ~ opp))
-
-rm(g1, g2)
+      TRUE ~ opp)) %>% 
+  arrange(gameday, gametime, old_game_id, location)
+return(g)
+}
