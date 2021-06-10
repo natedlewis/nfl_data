@@ -139,7 +139,7 @@ dplyr::select(tidyselect::any_of(c(
   "rz_cmp_rate", "ez_cmp_rate", "deep_cmp_rate", "pass_td_1", "pass_td_20", "pass_td_50", "int_tds",
   
   # rushing stats
-  "big_runs", "in_five_carries", "in_ten_carries", "neu_carries", "rush_td_1", "rush_td_10", 
+  "touches", "big_runs", "in_five_carries", "in_ten_carries", "neu_carries", "rush_td_1", "rush_td_10", 
   "rush_td_30", "rush_td_50",
   
   # receiving stats
@@ -165,7 +165,7 @@ adv_wkly <- joined_adv %>%
     "rz_cmp_rate", "ez_cmp_rate", "deep_cmp_rate",
     
     # rushing stats
-    "big_runs", "in_five_carries", "in_ten_carries", "neu_carries",
+    "touches", "big_runs", "in_five_carries", "in_ten_carries", "neu_carries",
     
     # receiving stats
     "rz_tgts", "ez_tgts", "deep_tgts", "rz_rec", "ez_rec",
