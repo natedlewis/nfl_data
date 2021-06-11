@@ -6,7 +6,7 @@ output: github_document
 ---
 
 Load libraries
-```{r}
+```{r message=FALSE}
 library(nflfastR)
 library(tidyverse)
 library(qs)
