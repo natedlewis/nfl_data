@@ -13,14 +13,14 @@ library(qs)
 ```
 
 Initial play-by-play load 
-```{r}
+```{r message=FALSE}
 future::plan("multisession")
 pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
   progressr::with_progress()
 ```
 
 Filter out dead plays
-```{r}
+```{r message=FALSE}
 data <- pbp %>%
   dplyr::filter(
     !is.na(.data$down),
@@ -29,15 +29,28 @@ data <- pbp %>%
   decode_player_ids()
 ```
 
-Load weekly stats
+Get game data
 ```{r}
+# get game data
+s_type <- pbp %>%
+  dplyr::select(.data$season, .data$season_type, .data$week) %>%
+  dplyr::distinct()
+```
+
+Load weekly stats
+```{r message=FALSE}
 raw_wkly <- calculate_player_stats(pbp, weekly = TRUE) %>% 
   progressr::with_progress()
 ```
 
 Load game data
-```{r}
+```{r message=FALSE}
 games <- read_csv("https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
 games <- clean_games(games)
+```
+
+Load historical ADP
+```{r}
+adp <- read_csv("adp_all.csv") 
 ```
 
