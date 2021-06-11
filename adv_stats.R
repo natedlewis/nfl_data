@@ -1,8 +1,3 @@
-# get game data
-s_type <- pbp %>%
-  dplyr::select(.data$season, .data$season_type, .data$week) %>%
-  dplyr::distinct()
-
 # create additional stats by play type -----------------------------------------------------------
 
 # passing stats
@@ -247,6 +242,24 @@ nw_wkly <- joined_adv %>%
   select(-conversions, -interceptions) %>% 
   relocate(nw_fantasy_points, .before = pass_yds_300)
 
+# next gen stats ---------------------------------------------------------------
+
+# load next gen stats
+ngs <- list.files(pattern = "*ing.csv") %>% 
+  map_df(~read_csv(.))
+
+# clean ngs data
+ngs_wkly <- ngs %>% 
+  relocate(player_gsis_id, .before = season) %>% 
+  rename(player_id = player_gsis_id,
+         player_name = player_display_name,
+         position = player_position,
+         team = team_abbr) %>% 
+  filter(season_type == "REG") %>% 
+  select(player_id:team, -season_type, avg_time_to_throw:avg_air_yards_to_sticks, passer_rating, 
+         completion_percentage, max_air_distance, avg_cushion, percent_share_of_intended_air_yards, 
+         avg_yac:avg_time_to_los, expected_rush_yards, rush_pct_over_expected)
+
 # remove stale objects -----------------------------------------------------------
 
-rm(pass, rush, rec, st, joined_adv, ms)
+rm(pass, rush, rec, st, joined_adv, ms, ngs)
