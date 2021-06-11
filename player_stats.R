@@ -1,11 +1,3 @@
-# load plays
-future::plan("multisession")
-pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
-  progressr::with_progress()
-
-# load weekly stats
-raw_wkly <- calculate_player_stats(pbp, weekly = TRUE)
-
 # built in function more finding the most commonly used player name
 custom_mode <- function(x, na.rm = TRUE) {
   if(na.rm){x <- x[!is.na(x)]}
@@ -58,7 +50,7 @@ reg_ovr <- reg_wkly %>%
   dplyr::group_by(.data$player_id, season) %>%
   dplyr::summarise(
     season = last(season),
-    player_name = custom_mode(.data$player_name),
+    player_name = custom_mode(.data$full_name),
     games = dplyr::n(),
     recent_team = dplyr::last(.data$recent_team),
     position = dplyr::last(.data$position),
@@ -181,15 +173,24 @@ reg_ovr <- reg_wkly %>%
   dplyr::mutate(std_pos_rk = 1:n()) %>%
   ungroup()
 
+# select variables from adp df
+adp <- adp %>% select(player_id, season, pick, overall) 
+
+# join to season stats
+reg_ovr <- reg_ovr %>% left_join(adp, by = c("player_id", "season"))
+
 #qb stats
 ovr_qb <- reg_ovr %>% 
-  filter(position == "QB") %>% 
-  select(player_id, player_name, recent_team, position, age,
+  filter(position == "QB", nw_pos_rk <= 25) %>% 
+  select(season, player_name, recent_team, games,
          cmp:int_tds,
          car:rush_tds, in_five_car,
-         nw_fpts:std_pos_rk) %>% 
-  select(nw_pos_rk, everything()) %>% 
-  mutate(across(where(is.numeric), round, 2))
+         nw_fpts:std_pos_rk,
+         player_id) %>% 
+  select(season, nw_pos_rk, everything()) %>% 
+  rename(rk = nw_pos_rk) %>% 
+  mutate(across(where(is.numeric), round, 2)) %>% 
+  arrange(-season, rk)
 
 # wr/te stats
 ovr_wr_te <- reg_ovr %>% 
