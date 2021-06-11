@@ -14,8 +14,8 @@ raw_injuries <-
   unnest(year_df)
 
 # clean df
-injuries_cl <- raw_injuries %>%
-  relocate(gsis_id, .before = X1) %>%
+injuries_cl <- raw_injuries %>% 
+  select(gsis_id, everything()) %>% 
   filter(!is.na(gsis_id) & position %in% c("WR", "TE", "RB", "QB", "FB")) %>% 
   rename(player_id = gsis_id,
          season = Season,
