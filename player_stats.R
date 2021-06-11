@@ -188,7 +188,7 @@ ovr_qb <- reg_ovr %>%
          cmp:int_tds,
          car:rush_tds, in_five_car,
          nw_fpts:std_pos_rk) %>% 
-  relocate(nw_pos_rk, .after = age) %>% 
+  select(nw_pos_rk, everything()) %>% 
   mutate(across(where(is.numeric), round, 2))
 
 # wr/te stats
@@ -197,7 +197,7 @@ ovr_wr_te <- reg_ovr %>%
   select(player_id, player_name, recent_team, position, age,
          rec:rec_td_50,
          nw_fpts:std_pos_rk) %>% 
-  relocate(nw_pos_rk, .after = age) %>% 
+  select(nw_pos_rk, everything()) %>% 
   mutate(across(where(is.numeric), round, 2))
 
 # rb stats
@@ -207,7 +207,7 @@ ovr_rb <- reg_ovr %>%
          car:combo_yds_150,
          rec:rec_tds, rz_tgts,
          nw_fpts:std_pos_rk) %>% 
-  relocate(nw_pos_rk, .after = age) %>% 
+  select(nw_pos_rk, everything()) %>% 
   mutate(across(where(is.numeric), round, 2))
 
 # wr/te weekly stats

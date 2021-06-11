@@ -1,17 +1,3 @@
-# prepare data ------------------------------------------------------------
-
-# load plays
-pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
-  progressr::with_progress()
-
-# get plays that count in official stats
-data <- pbp %>%
-  dplyr::filter(
-    !is.na(.data$down),
-    .data$play_type %in% c("pass", "qb_kneel", "qb_spike", "run")
-  ) %>%
-  decode_player_ids()
-
 # get game data
 s_type <- pbp %>%
   dplyr::select(.data$season, .data$season_type, .data$week) %>%
