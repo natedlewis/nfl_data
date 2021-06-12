@@ -59,31 +59,27 @@ initial_lines <- read_csv("https://raw.githubusercontent.com/nflverse/nfldata/ma
 initial_totals  <- initial_lines %>% 
   filter(type == "TOTAL", side == "Over") %>% 
   select(-side, -type, -sportsbook, -season) %>% 
-  rename(total = line)
+  rename(total = line,
+         game_id = about)
 
 # create object for spreads
 initial_spreads  <- initial_lines %>% 
   filter(type == "SPREAD") %>% 
   select(-type, -sportsbook, -season) %>% 
-  rename(spread = line)
+  rename(spread = line,
+         game_id = about)
+
+# join obejcts
+cleaned_lines <- initial_spreads %>% left_join(initial_totals, by = c("game_id")) %>% 
+  rename(team = side)
 
 # 2021 odds
 games_21 <- games %>% filter(season == 2021)
 
-# clean games
+# clean games 
 games_21 <- games_21[,colSums(is.na(games_21))<nrow(games_21)] %>% 
   select(-season, -week, -spread_line, -total_line)
 
-# join
-joined <- games_21 %>% 
-  left_join(initial_spreads, by = c("game_id", "team")) %>% 
-  mutate(team_pts = total/2 + spread/2)
-
-joined %>% 
-  group_by(team) %>% 
-  summarise(tot = sum(spread),
-            wins = sum(win_loss)) %>% 
-  arrange(tot) %>% 
-  mutate(rk = row_number()) %>% 
-  filter(rk <= 5 | rk >= 26)
+# join lines
+games_21 <- left_join(cleaned_lines, by = c("game_id", "team"))
 
