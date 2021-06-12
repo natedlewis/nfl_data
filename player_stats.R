@@ -43,14 +43,19 @@ full_wkly <- raw_wkly %>%
 rm(y1, y2, y3, y4, y5, y6)
 
 # create objects for regular season games
-reg_wkly <- full_wkly %>% filter(week <= 17)
+reg_wkly <- full_wkly %>% filter(week <= 17) %>% 
+  select(season, player_name, recent_team, position, week, opp, everything()) %>% 
+  relocate(any_of(c("player_id", "full_name", "years_exp", "height", "weight", "college", "draft_year", "draft_round",
+                    "draft_pick", "depth_chart_postion", "pff_id", "fantasy_data_id", "pfr_id", "fantasypros_id",
+                    "mfl_id", "sleeper_id")), .after = last_col()) %>% 
+  arrange(-season, week, recent_team, position)
 
 # sum full weekly stats to get totals across full season
 reg_ovr <- reg_wkly %>%
   dplyr::group_by(.data$player_id, season) %>%
   dplyr::summarise(
     season = last(season),
-    player_name = custom_mode(.data$full_name),
+    player_name = custom_mode(.data$player_name),
     games = dplyr::n(),
     recent_team = dplyr::last(.data$recent_team),
     position = dplyr::last(.data$position),
@@ -164,7 +169,7 @@ reg_ovr <- reg_wkly %>%
     nw_fpts = sum(nw_fantasy_points),
     sd_nw = sd(nw_fantasy_points),
     "nw_fpts/g" = nw_fpts/games,
-    fpts = sum(fantasy_points),
+    fpts = sum(fantasy_points)
     ) %>% 
   arrange(-nw_fpts) %>% 
   dplyr::group_by(position, season) %>%
@@ -174,7 +179,9 @@ reg_ovr <- reg_wkly %>%
   ungroup()
 
 # select variables from adp df
-adp <- adp %>% select(player_id, season, pick, overall) 
+adp <- adp %>% 
+  rename(player_id = gsis_id) %>% 
+  select(player_id, season, pick, overall) 
 
 # join to season stats
 reg_ovr <- reg_ovr %>% left_join(adp, by = c("player_id", "season"))
@@ -239,4 +246,12 @@ wr_wkly <- full_wkly %>%
     # snap counts
     "total_snaps", "offense_snaps", "offense_snap_rate", "special_teams_snaps", "special_teams_snap_rate"
   )))
+
+write_csv(reg_ovr, "season_stats.csv")
+write_csv(ovr_qb, "qb_season_stats.csv")
+write_csv(reg_wkly, "weekly_stats.csv")
+
+
+
+
 
