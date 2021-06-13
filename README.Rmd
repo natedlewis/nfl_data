@@ -54,3 +54,17 @@ Load historical ADP
 adp <- read_csv("adp_all.csv") 
 ```
 
+The pattern argument uses regular expressions. You can use a caret ^ to match the beginning of the string:
+```{r}
+rm(list=ls(pattern="^tp_"))
+rm(list=setdiff(ls(pattern = "^tp_"), lsf.str()))
+```
+Other patterns for managing temporary items / keeping clean workspaces than name prefixes.
+```{r}
+temp<-new.env()
+temp$x <- 1
+temp$y <- 2
+with(temp,x+y)
+#> 3
+rm(temp)
+```
