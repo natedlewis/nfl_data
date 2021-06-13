@@ -9,13 +9,6 @@ season <- read_csv("season_stats.csv")
 # load weekly stats
 weekly <- read_csv("weekly_stats.csv")
 
-# remove duplicates
-season <- season[!duplicated(season[ , c("player_id","season", "recent_team")]),]
-weekly <- weekly[!duplicated(weekly[ , c("player_id", "game_id")]),]
-
-write_csv(season, "season_stats.csv")
-write_csv(weekly, "weekly_stats.csv")
-
 # mutate position variable to WR/TE for receievrs and create new positinal ranks
 season <- season %>% 
   mutate(nw_position = case_when(position == 'TE'| position == 'WR' ~ 'WR/TE', TRUE ~ position)) %>% 
