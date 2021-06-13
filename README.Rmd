@@ -68,3 +68,5 @@ with(temp,x+y)
 #> 3
 rm(temp)
 ```
+
+Steve Smith needs to be fixed, plays 32 games in season stats
