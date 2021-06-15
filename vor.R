@@ -2,11 +2,11 @@ season <- read_csv("season_stats.csv")
 
 season <- season %>% group_by(season) %>% arrange(overall) %>% mutate(adp_rk = 1:n()) %>% ungroup()
 
-baseline_qb <- season %>% filter(nw_position == "QB", nw_pos_rk == 12) %>% select(season, nw_position, nw_fpts, pick)
+baseline_qb <- season %>% filter(nw_position == "QB", nw_pos_rk == 10) %>% select(season, nw_position, nw_fpts, pick)
 
-baseline_rb <- season %>% filter(nw_position == "RB", nw_pos_rk == 36) %>% select(season, nw_position, nw_fpts, pick)
+baseline_rb <- season %>% filter(nw_position == "RB", nw_pos_rk == 30) %>% select(season, nw_position, nw_fpts, pick)
 
-baseline_rec <-season %>% filter(nw_position == "WR/TE", nw_pos_rk == 36) %>% select(season, nw_position, nw_fpts, pick)
+baseline_rec <-season %>% filter(nw_position == "WR/TE", nw_pos_rk ==30) %>% select(season, nw_position, nw_fpts, pick)
 
 baseline_all <- baseline_qb %>% bind_rows(baseline_rb) %>% bind_rows(baseline_rec) %>% rename(baseline = nw_fpts)
 
@@ -18,7 +18,12 @@ season <- season %>% mutate(vor = nw_fpts - baseline)
 
 vor <- season %>% select(player_id:nw_position, adp_rk, nw_fpts, baseline, vor) %>% arrange(-season, adp_rk)
 
-vor %>% filter(adp_rk == 2) %>% select(season:position, vor)
+
+
+ggplot(vor, aes(x = vor, y = nw_position, fill = nw_position)) +
+  geom_density_ridges() +
+  theme_ridges() + 
+  theme(legend.position = "none")
 
 
 x <- vor %>% group_by(adp_rk) %>% 
