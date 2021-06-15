@@ -9,7 +9,7 @@ season <- read_csv("season_stats.csv")
 # load weekly stats
 weekly <- read_csv("weekly_stats.csv")
 
-# mutate position variable to WR/TE for receievrs and create new positinal ranks
+# mutate position variable to WR/TE for receivers and create new positional ranks
 season <- season %>% 
   mutate(nw_position = case_when(position == 'TE'| position == 'WR' ~ 'WR/TE', TRUE ~ position)) %>% 
   arrange(-nw_fpts) %>% 
@@ -26,7 +26,7 @@ qb <- season %>%
   filter(position == "QB", nw_pos_rk <= 25) %>% 
   select(season, player_name, position, recent_team, games,
          cmp:int_tds,
-         car:rush_tds, in_five_ten,
+         car:rush_tds,
          nw_fpts:std_pos_rk,
          player_id) %>% 
   select(season, nw_pos_rk, everything()) %>% 
