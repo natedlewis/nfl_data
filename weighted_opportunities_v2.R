@@ -5,6 +5,8 @@ future::plan("multisession")
 pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
   progressr::with_progress()
 
+options(scipen = 9999)
+
 # filter out dead plays and post season games
 data <- pbp %>%
   dplyr::filter(
@@ -14,28 +16,20 @@ data <- pbp %>%
   ) %>%
   decode_player_ids()
 
-# load rushing stats
+# load weekly stats
+wkly_stats <- calculate_player_stats(data, weekly = TRUE)
+
+# load weekly rushing stats
 rush_stats <- calculate_player_stats(data %>% filter(.data$play_type %in% c("run", "qb_kneel")), weekly = TRUE)
 
-# load receiving stats
+# load weekly receiving stats
 rec_stats <- calculate_player_stats(data %>% filter(!is.na(.data$receiver_player_id)), weekly = TRUE)
 
-# load all stats to find combo yds
-combo_stats <- calculate_player_stats(data, weekly = TRUE)
+# load roster
+roster <- fast_scraper_roster(2010:2020)
 
-# calc games played
-games <- combo_stats %>% group_by(player_id, season) %>% 
-  summarise(games = n(),
-            std_fpts = sum(fantasy_points))
-
-# create combo yard milestones
-combo_ms <- combo_stats %>% 
-  group_by(player_id, season) %>% 
-  summarise(
-    "combo_yds_100" = sum(.data$rushing_yards >= 50 & .data$receiving_yards >= 50),
-    "combo_yds_150" = sum(.data$rushing_yards >= 75 & .data$receiving_yards >= 75)) %>% 
-  dplyr::filter(!is.na(.data$player_id)) %>% 
-  ungroup()
+# games played
+games <- wkly_stats %>% group_by(player_id, season) %>% summarise(games = sum(n()))
 
 # rushing ----
 
@@ -47,30 +41,39 @@ rush <- data %>%
     name_rush = dplyr::first(.data$rusher_player_name),
     team_rush = dplyr::first(.data$posteam),
     total_carries = dplyr::n(),
-    rz_carries = sum(total_carries & .data$yardline_100 <= 20),
-    inside_ten_carries = sum(total_carries & .data$yardline_100 <= 10),
-    inside_five_carries = sum(total_carries & .data$yardline_100 <= 5),
-    outside_rz_carries = total_carries - rz_carries,
+    rz_carries = sum(total_carries & .data$yardline_100 <= 20 & .data$yardline_100 >= 10),
+    inside_ten_carries = sum(total_carries & .data$yardline_100 <= 9),
+    outside_rz_carries = sum(total_carries & .data$yardline_100 > 20),
     neu_carries = sum(total_carries & .data$wp > .20 & .data$wp < .80 & .data$down <= 2 & .data$qtr <= 2 & .data$half_seconds_remaining > 120, na.rm = TRUE),
-    gt_carries = total_carries - neu_carries,
+    gt_carries = sum(total_carries & .data$wp < .20 & .data$wp > .80 & .data$down <= 2 & .data$qtr <= 2 & .data$half_seconds_remaining > 120, na.rm = TRUE),
     "rush_td_1" = sum(.data$td_player_id == .data$rusher_player_id & .data$yards_gained <= 9, na.rm = TRUE),
     "rush_td_10" = sum(.data$td_player_id == .data$rusher_player_id & .data$yards_gained >= 10 & yards_gained <= 29, na.rm = TRUE),
     "rush_td_30" = sum(.data$td_player_id == .data$rusher_player_id & .data$yards_gained >= 30 & yards_gained <= 49, na.rm = TRUE),
     "rush_td_50" = sum(.data$td_player_id == .data$rusher_player_id & .data$yards_gained >= 50, na.rm = TRUE)) %>% 
   rename(player_id = rusher_player_id)
 
-# create rushing milestones
+# rushing milestones
 rush_ms <- rush_stats %>% 
   group_by(player_id, season) %>% 
   summarise(
     "rush_yds_100" = sum(.data$rushing_yards >= 100 & .data$rushing_yards <= 149),
     "rush_yds_150" = sum(.data$rushing_yards >= 150 & .data$rushing_yards <= 199),
     "rush_yds_200" = sum(.data$rushing_yards >= 200),
-    conversions = sum(.data$rushing_2pt_conversions)) %>% 
+    conversions = sum(.data$rushing_2pt_conversions),
+    std_fpts_rush = sum(fantasy_points)) %>% 
   dplyr::filter(!is.na(.data$player_id)) %>% 
   ungroup()
 
-# join milestones to rush df
+# combo yds/games played
+combo_ms <- wkly_stats %>% 
+  group_by(player_id, season) %>% 
+  summarise(
+    "combo_yds_100" = sum(.data$rushing_yards >= 50 & .data$receiving_yards >= 50),
+    "combo_yds_150" = sum(.data$rushing_yards >= 75 & .data$receiving_yards >= 75)) %>% 
+  dplyr::filter(!is.na(.data$player_id)) %>% 
+  ungroup()
+
+# join to single object
 joined_rush <- rush %>% 
   left_join(rush_ms, by = c("player_id", "season")) %>% 
   left_join(combo_ms, by = c("player_id", "season"))
@@ -95,6 +98,7 @@ joined_rush <- joined_rush %>%
 
 # receiving ----
 
+# targets/receiving tds
 rec <- data %>%
   dplyr::filter(!is.na(.data$receiver_player_id)) %>%
   dplyr::group_by(.data$receiver_player_id, .data$season) %>%
@@ -113,24 +117,28 @@ rec <- data %>%
     "rec_td_50" = sum(.data$td_player_id == .data$receiver_player_id & yards_gained >= 50, na.rm = TRUE)) %>% 
   rename(player_id = receiver_player_id)
 
+# receiving milestones/std fpts
 rec_ms <- rec_stats %>% 
   group_by(player_id, season) %>% 
   summarise(
     "rec_yds_100" = sum(.data$receiving_yards >= 100 & .data$receiving_yards <= 149),
     "rec_yds_150" = sum(.data$receiving_yards >= 150 & .data$receiving_yards <= 199),
     "rec_yds_200" = sum(.data$receiving_yards >= 200),
-    conversions = sum(.data$receiving_2pt_conversions)) %>% 
+    conversions = sum(.data$receiving_2pt_conversions),
+    std_fpts_rec = sum(fantasy_points)) %>% 
   dplyr::filter(!is.na(.data$player_id)) %>% 
   ungroup()
 
+# join to single object
 joined_rec <- rec %>% 
   left_join(rec_ms, by = c("player_id", "season")) %>% 
   left_join(combo_ms, by = c("player_id", "season"))
 
+# detetc na values and remove
 na_rec <- is.na(joined_rec)
 joined_rec[na_rec] <- 0
 
-# create nw_fpts from recing plays
+# create nw_fpts from receiving plays
 joined_rec <- joined_rec %>% 
   group_by(player_id, season) %>% 
   mutate(nw_fpts_combo = sum(10 * combo_yds_100, 10 * combo_yds_150),
@@ -146,7 +154,7 @@ joined_rec <- joined_rec %>%
 # join ----
 
 # join objects
-player_df <- joined_rush %>%
+joined_all <- joined_rush %>%
   dplyr::full_join(joined_rec, by = c("player_id", "season")) %>%
   dplyr::mutate(
     player_name = dplyr::case_when(
@@ -164,41 +172,43 @@ player_df <- joined_rush %>%
     "player_id", "player_name", "recent_team", "season",
     
     # rushing stats
-    "total_carries", "rz_carries", "inside_ten_carries", "inside_five_carries", 
-    "outside_rz_carries", "neu_carries", "gt_carries", "nw_fpts_rush",
+    "total_carries", "rz_carries", "inside_ten_carries", 
+    "outside_rz_carries", "neu_carries", "gt_carries", "nw_fpts_rush", "std_fpts_rush",
     
     # receiving stats
     "total_tgts", "rz_tgts", "outside_rz_tgts", "ez_tgts_inside_rz",
-    "ez_tgts_outside_rz", "short_tgts", "deep_tgts", "nw_fpts_rec"
+    "ez_tgts_outside_rz", "short_tgts", "deep_tgts", "nw_fpts_rec", "std_fpts_rec"
     
   ))) %>%
   dplyr::filter(!is.na(.data$player_id))
 
-player_df_nas <- is.na(player_df)
-player_df[player_df_nas] <- 0
+joined_all_nas <- is.na(joined_all)
+joined_all[joined_all_nas] <- 0
 
 # join roster
-joined_player_df <- player_df %>% 
+joined_all <- joined_all %>% 
   left_join(roster %>% select(gsis_id, season, position, full_name), by = c("player_id" = "gsis_id", "season")) %>% 
   left_join(games, by = c("player_id", "season"))
 
-offense_df <- joined_player_df %>% 
+# filter to offense
+offense <- joined_all %>% 
   filter(position %in% c("QB", "RB", "WR", "TE")) %>% 
   mutate(nw_position = case_when(position == 'TE'| position == 'WR' ~ 'WR/TE', TRUE ~ position),
          touches = sum(total_tgts, total_carries),
          player_name = ifelse(is.na(full_name), player_name, full_name)) %>% 
-  select(season, player_name, recent_team, position, games, touches, total_carries:nw_fpts_rec, std_fpts, player_id, nw_position)
+  select(season, player_name, recent_team, position, games, touches, total_carries:std_fpts_rec, player_id, nw_position) %>% 
+  mutate(across(where(is.numeric), round, 2))
 
 # running backs ----
 
 # filter to running backs
-rb <- offense_df %>% 
+rb <- offense %>% 
   filter(position == "RB", touches/games > 8) %>% 
   mutate(fpts_per_carry = nw_fpts_rush/total_carries,
-         fpts_per_rz_carry = nw_fpts_rush/rz_carries,
          fpts_per_outside_rz_carry = nw_fpts_rush/outside_rz_carries,
+         carry_opps = total_carries * fpts_per_carry,
+         fpts_per_rz_carry = nw_fpts_rush/rz_carries,
          fpts_per_inside_ten_carry = nw_fpts_rush/inside_ten_carries,
-         fpts_per_inside_five_carry = nw_fpts_rush/inside_five_carries,
          fpts_per_neu_carry = nw_fpts_rush/neu_carries,
          fpts_per_gt_carry = nw_fpts_rush/gt_carries,
          fpts_per_tgt = nw_fpts_rec/total_tgts,
@@ -209,7 +219,8 @@ rb <- offense_df %>%
          fpts_per_deep_tgt = nw_fpts_rec/deep_tgts
          ) %>% 
   mutate(across(where(is.numeric), round, 2)) %>% 
-  arrange(-touches)
+  arrange(-touches) %>% 
+  ungroup()
 
 is.na(rb) <- sapply(rb, is.infinite)
 rb[is.na(rb)] <- NA
@@ -217,50 +228,29 @@ rb[is.na(rb)] <- NA
 # average fpts per opportunity by type across past 10 seasons
 season_avg <- rb %>% 
   group_by(position, season) %>% 
-  summarise(avg_fpts_per_carry = mean(fpts_per_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_rz_carry = mean(fpts_per_rz_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_outside_rz_carry = mean(fpts_per_outside_rz_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_inside_ten_carry = mean(fpts_per_inside_ten_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_inside_five_carry = mean(fpts_per_inside_five_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_neu_carry = mean(fpts_per_neu_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_gt_carry = mean(fpts_per_gt_carry, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_tgt = mean(fpts_per_tgt, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_rz_tgt = mean(fpts_per_rz_tgt, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_outside_rz_tgt = mean(fpts_per_outside_rz_tgt, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_ez_tgt = mean(fpts_per_ez_tgt, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_short_tgt = mean(fpts_per_short_tgt, trim = 0.05, na.rm = TRUE),
-            avg_fpts_per_deep_tgt = mean(fpts_per_deep_tgt, trim = 0.05, na.rm = TRUE)) %>% 
-  mutate(across(where(is.numeric), round, 2))
-
-# aggregate average
-agg_avg <- season_avg %>% 
-  group_by(position) %>% 
-  summarise(season = 10,
-            avg_fpts_per_carry = mean(avg_fpts_per_carry),
-            avg_fpts_per_rz_carry = mean(avg_fpts_per_rz_carry),
-            avg_fpts_per_outside_rz_carry = mean(avg_fpts_per_outside_rz_carry),
-            avg_fpts_per_inside_ten_carry = mean(avg_fpts_per_inside_ten_carry),
-            avg_fpts_per_inside_five_carry = mean(avg_fpts_per_inside_five_carry),
-            avg_fpts_per_neu_carry = mean(avg_fpts_per_neu_carry),
-            avg_fpts_per_gt_carry = mean(avg_fpts_per_gt_carry),
-            avg_fpts_per_tgt = mean(avg_fpts_per_tgt),
-            avg_fpts_per_rz_tgt = mean(avg_fpts_per_rz_tgt),
-            avg_fpts_per_outside_rz_tgt = mean(avg_fpts_per_outside_rz_tgt),
-            avg_fpts_per_ez_tgt = mean(avg_fpts_per_ez_tgt),
-            avg_fpts_per_short_tgt = mean(avg_fpts_per_short_tgt),
-            avg_fpts_per_deep_tgt = mean(avg_fpts_per_deep_tgt)) %>% 
-  mutate(across(where(is.numeric), round, 2))
+  summarise(avg_fpts_per_carry = mean(fpts_per_carry, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_rz_carry = mean(fpts_per_rz_carry, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_outside_rz_carry = mean(fpts_per_outside_rz_carry, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_inside_ten_carry = mean(fpts_per_inside_ten_carry, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_neu_carry = mean(fpts_per_neu_carry, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_gt_carry = mean(fpts_per_gt_carry, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_tgt = mean(fpts_per_tgt, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_rz_tgt = mean(fpts_per_rz_tgt, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_outside_rz_tgt = mean(fpts_per_outside_rz_tgt, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_ez_tgt = mean(fpts_per_ez_tgt, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_short_tgt = mean(fpts_per_short_tgt, trim = 0.2, na.rm = TRUE),
+            avg_fpts_per_deep_tgt = mean(fpts_per_deep_tgt, trim = 0.2, na.rm = TRUE)) %>% 
+  mutate(across(where(is.numeric), round, 2)) %>% 
+  ungroup()
 
 # aggregate average
 recent_avg <- season_avg %>% 
-  filter(season >= 2018) %>% 
+  filter(season >= 2018) %>%
   group_by(position) %>% 
-  summarise(season = 3,
-            avg_fpts_per_carry = mean(avg_fpts_per_carry),
+  summarise(avg_fpts_per_carry = mean(avg_fpts_per_carry),
             avg_fpts_per_rz_carry = mean(avg_fpts_per_rz_carry),
             avg_fpts_per_outside_rz_carry = mean(avg_fpts_per_outside_rz_carry),
             avg_fpts_per_inside_ten_carry = mean(avg_fpts_per_inside_ten_carry),
-            avg_fpts_per_inside_five_carry = mean(avg_fpts_per_inside_five_carry),
             avg_fpts_per_neu_carry = mean(avg_fpts_per_neu_carry),
             avg_fpts_per_gt_carry = mean(avg_fpts_per_gt_carry),
             avg_fpts_per_tgt = mean(avg_fpts_per_tgt),
@@ -270,6 +260,24 @@ recent_avg <- season_avg %>%
             avg_fpts_per_short_tgt = mean(avg_fpts_per_short_tgt),
             avg_fpts_per_deep_tgt = mean(avg_fpts_per_deep_tgt)) %>% 
   mutate(across(where(is.numeric), round, 2))
+
+rb_opps <- rb %>% left_join(recent_avg, by = c("position")) %>% group_by(player_id, season) %>% 
+  summarise(player_name = last(player_name),
+            position = last(position),
+            games = games,
+            nw_fpts = sum(nw_fpts_rush),
+            carry_opps = sum(total_carries * avg_fpts_per_carry),
+            rz_opps = sum(rz_carries * avg_fpts_per_rz_carry),
+            inside_ten_opps = sum(inside_ten_carries * avg_fpts_per_inside_ten_carry)) %>% 
+  dplyr::arrange(-nw_fpts) %>%
+  dplyr::ungroup() %>%
+  dplyr::group_by(position, season) %>%
+  dplyr::mutate(rk = 1:n(),
+                new_fpts = nw_fpts - carry_opps) %>% 
+  select(rk, player_name:games, nw_fpts, carry_opps:inside_ten_opps, new_fpts) %>% 
+  mutate(across(where(is.numeric), round, 0))
+                         
+                         
 
 # bind rows to single object
 avg <- season_avg %>% bind_rows(agg_avg) %>% bind_rows(recent_avg)

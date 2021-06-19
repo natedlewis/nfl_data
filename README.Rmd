@@ -10,63 +10,785 @@ Load libraries
 library(nflfastR)
 library(tidyverse)
 library(qs)
+library(glue)
 ```
 
-Initial play-by-play load 
+Load helper functions
+```{r}
+clean_games <- function(g) {
+  g1 <- games %>%
+    rename(
+      team = away_team,
+      team_score = away_score,
+      opp = home_team,
+      opp_score = home_score,
+      team_rest = away_rest,
+      opp_rest = home_rest,
+      team_moneyline = away_moneyline,
+      opp_moneyline = home_moneyline,
+      team_spread_odds = away_spread_odds,
+      opp_spread_odds = home_spread_odds,
+      team_coach = away_coach,
+      opp_coach = home_coach
+    ) %>%
+    mutate(
+      location = ifelse(location  ==  "Home", "Away", location),
+      result = -1 * result,
+      spread_line = -1 * spread_line
+    )
+  
+  g2 <- games %>%
+    rename(
+      team = home_team,
+      team_score = home_score,
+      opp = away_team,
+      opp_score = away_score,
+      team_rest = home_rest,
+      opp_rest = away_rest,
+      team_moneyline = home_moneyline,
+      opp_moneyline = away_moneyline,
+      team_spread_odds = home_spread_odds,
+      opp_spread_odds = away_spread_odds,
+      team_coach = home_coach,
+      opp_coach = away_coach
+    )
+  
+  g <- bind_rows(g1, g2) %>%
+    mutate(team = case_when(
+      team == 'OAK' ~ 'LV',
+      team == 'SD' ~ 'LAC',
+      team == 'STL' ~ 'LA',
+      TRUE ~ team
+    )) %>%
+    mutate(opp = case_when(opp == 'OAK' ~ 'LV',
+                           opp == 'SD' ~ 'LAC',
+                           opp == 'STL' ~ 'LA',
+                           TRUE ~ opp)) %>%
+    arrange(gameday, gametime, old_game_id, location)
+  return(g)
+}
+scrape_page <- function(page){
+    read_csv(glue("https://raw.githubusercontent.com/jchernak96/NFL-Injury-Data-PFR-/master/Data/PFR_{page}_Injuries.csv"))
+  }
+
+```
+
+Load data
 ```{r message=FALSE}
+
+# Play by play
 future::plan("multisession")
 pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
   progressr::with_progress()
-```
 
-Filter out dead plays
-```{r message=FALSE}
+# Change notation
+options(scipen = 9999)
+
+# Filter out dead plays and post season games
 data <- pbp %>%
   dplyr::filter(
+    season_type == "REG",
     !is.na(.data$down),
     .data$play_type %in% c("pass", "qb_kneel", "qb_spike", "run")
   ) %>%
   decode_player_ids()
-```
 
-Get game data
-```{r}
-# get game data
-s_type <- pbp %>%
-  dplyr::select(.data$season, .data$season_type, .data$week) %>%
-  dplyr::distinct()
-```
+# Load roster data
+rosters <- fast_scraper_roster(2010:2021)
 
-Load weekly stats
-```{r message=FALSE}
+# Load basic weeekly stats
 raw_wkly <- calculate_player_stats(pbp, weekly = TRUE) %>% 
   progressr::with_progress()
-```
 
-Load game data
-```{r message=FALSE}
+# Load game data
 games <- read_csv("https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv")
-games <- clean_games(games)
+
+games <- clean_games(games) %>% select(
+  team,
+  season,
+  week,
+  game_id,
+  opp,
+  team_score,
+  opp_score,
+  location,
+  spread_line,
+  team_coach,
+  opp_coach
+)
+
+# Load ADP data
+adp <- read_csv("adp_all.csv") %>% rename(player_id = gsis_id)
+
+
+# scrape raw injury data from pfr
+raw_injuries <- 
+  tibble(year = 2010:2020) %>% 
+  mutate(year_df = map(year, scrape_page)) %>% 
+  unnest(year_df)
+
+names(raw_injuries) <- tolower(names(raw_injuries))
+names(raw_injuries) <- gsub(x = names(raw_injuries), pattern = "\\.", replacement = "_")
+
+# only distinct
+cleaned_injuries <- subset(raw_injuries, !duplicated(subset(raw_injuries, select=c(gsis_id, season, week)))) %>% 
+  select(gsis_id, season, week, active_inactive, game_designation, started, total_snaps, offense_snaps, offense_snap_rate) %>% 
+  filter(!is.na(gsis_id)) %>% 
+  rename(player_id = gsis_id)
 ```
 
-Load historical ADP
+Create additional passing stats
 ```{r}
-adp <- read_csv("adp_all.csv") 
+pass <- data %>%
+  dplyr::filter(.data$play_type %in% c("pass", "qb_spike")) %>%
+  dplyr::group_by(.data$passer_player_id, .data$week, .data$season) %>%
+  dplyr::summarize(
+    name_pass = dplyr::first(.data$passer_player_name),
+    team_pass = dplyr::first(.data$posteam),
+    attempts = sum(
+      .data$complete_pass == 1 |
+        .data$incomplete_pass == 1 | .data$interception == 1
+    ),
+    completions = sum(.data$complete_pass == 1),
+    pass_yds = sum(yards_gained),
+    rz_attempts = sum(.data$attempts & yardline_100 <= 20, na.rm = TRUE),
+    ez_attempts = sum(.data$attempts &
+                   .data$yardline_100 == .data$air_yards, na.rm = TRUE),
+    ez_attempts_inside_rz = sum(
+      .data$attempts &
+        .data$yardline_100 == .data$air_yards,
+      yardline_100 <= 20,
+      na.rm = TRUE
+    ),
+    ez_attempts_outside_rz = sum(
+      .data$attempts &
+        .data$yardline_100 == .data$air_yards,
+      yardline_100 > 20,
+      na.rm = TRUE
+    ),
+    deep_attempts = sum(.data$attempts &
+                     .data$air_yards >= 20, na.rm = TRUE),
+    rz_completions = sum(.data$complete_pass == 1 &
+                   yardline_100 <= 20, na.rm = TRUE),
+    ez_completions = sum(
+      .data$complete_pass == 1 &
+        .data$yardline_100 == .data$air_yards,
+      na.rm = TRUE
+    ),
+    deep_completions = sum(.data$complete_pass == 1 &
+                     .data$air_yards >= 20, na.rm = TRUE),
+    rz_completion_pct = ifelse(rz_attempts >= 1, rz_completions / rz_attempts, NA),
+    ez_completion_pct = ifelse(ez_attempts >= 1, ez_completions / ez_attempts, NA),
+    deep_completion_pct = ifelse(deep_attempts >= 1, deep_completions / deep_attempts, NA),
+    "pass_td_1" = sum(
+      .data$touchdown == 1 &
+        .data$td_team == .data$posteam &
+        .data$complete_pass == 1 & .data$yards_gained <= 19
+    ),
+    "pass_td_20" = sum(
+      .data$touchdown == 1 &
+        .data$td_team == .data$posteam &
+        .data$complete_pass == 1 &
+        .data$yards_gained >= 20 & .data$yards_gained <= 49
+    ),
+    "pass_td_50" = sum(
+      .data$touchdown == 1 &
+        .data$td_team == .data$posteam &
+        .data$complete_pass == 1 & .data$yards_gained >= 50
+    ),
+    "pass_yds_300" = sum(ifelse(pass_yds >= 300 &
+                                  pass_yds < 350, 1, 0)),
+    "pass_yds_350" = sum(ifelse(pass_yds >= 350 &
+                                  pass_yds < 400, 1, 0)),
+    "pass_yds_400" = sum(ifelse(pass_yds >= 400, 1, 0)),
+    int_tds = sum(
+      .data$interception &
+        .data$touchdown == 1 & .data$td_team == .data$defteam
+    )
+  ) %>%
+  dplyr::rename(player_id = .data$passer_player_id) %>%
+  dplyr::ungroup()
+
+pass_nas <- is.na(pass)
+pass[pass_nas] <- 0
+
+rush <- data %>%
+  dplyr::filter(.data$play_type %in% c("run", "qb_kneel")) %>%
+  dplyr::group_by(.data$rusher_player_id, .data$week, .data$season) %>%
+  dplyr::summarize(
+    name_rush = dplyr::first(.data$rusher_player_name),
+    team_rush = dplyr::first(.data$posteam),
+    carries = dplyr::n(),
+    rush_yds = sum(yards_gained),
+    rz_carries = sum(carries & .data$yardline_100 <= 20),
+    outside_rz_carries = sum(carries & .data$yardline_100 > 20),
+    inside_five_carries = sum(carries & .data$yardline_100 < 5),
+    inside_ten_carries = sum(carries & .data$yardline_100 < 10),
+    neutral_carries = sum(
+      carries &
+        .data$wp > .20 &
+        .data$wp < .80 &
+        .data$down <= 2 &
+        .data$qtr <= 2 & .data$half_seconds_remaining > 120,
+      na.rm = TRUE
+    ),
+    "rush_td_1" = sum(
+      .data$td_player_id == .data$rusher_player_id &
+        .data$yards_gained <= 9,
+      na.rm = TRUE
+    ),
+    "rush_td_10" = sum(
+      .data$td_player_id == .data$rusher_player_id &
+        .data$yards_gained >= 10 & yards_gained <= 29,
+      na.rm = TRUE
+    ),
+    "rush_td_30" = sum(
+      .data$td_player_id == .data$rusher_player_id &
+        .data$yards_gained >= 30 & yards_gained <= 49,
+      na.rm = TRUE
+    ),
+    "rush_td_50" = sum(
+      .data$td_player_id == .data$rusher_player_id &
+        .data$yards_gained >= 50,
+      na.rm = TRUE
+    ),
+    "rush_yds_100" = sum(ifelse(rush_yds >= 100 &
+                                  rush_yds < 150, 1, 0)),
+    "rush_yds_150" = sum(ifelse(rush_yds >= 150 &
+                                  rush_yds < 200, 1, 0)),
+    "rush_yds_200" = sum(ifelse(rush_yds >= 200, 1, 0))
+  ) %>%
+  dplyr::rename(player_id = .data$rusher_player_id) %>%
+  dplyr::ungroup()
+
+rush_nas <- is.na(rush)
+rush[rush_nas] <- 0
+
+rec <- data %>%
+  dplyr::filter(!is.na(.data$receiver_player_id)) %>%
+  dplyr::group_by(.data$receiver_player_id, .data$week, .data$season) %>%
+  dplyr::summarize(
+    name_receiver = dplyr::first(.data$receiver_player_name),
+    team_receiver = dplyr::first(.data$posteam),
+    targets = dplyr::n(),
+    receptions = sum(.data$complete_pass == 1),
+    rec_yds = sum(yards_gained),
+    rz_targets = sum(.data$targets & yardline_100 <= 20),
+    outside_rz_targets = sum(.data$targets & yardline_100 > 20),
+    ez_targets = sum(.data$targets &
+                    .data$yardline_100 == .data$air_yards),
+    ez_targets_inside_rz = sum(
+      .data$targets &
+        .data$yardline_100 == .data$air_yards & yardline_100 <= 20
+    ),
+    ez_targets_outside_rz = sum(
+      .data$targets &
+        .data$yardline_100 == .data$air_yards & yardline_100 > 20
+    ),
+    deep_targets = sum(.data$targets & .data$air_yards >= 20),
+    receiving_air_yards = sum(.data$air_yards, na.rm = TRUE),
+    adot = ifelse(targets >= 1, receiving_air_yards / targets, NA),
+    catch_rate = ifelse(targets >= 1, receptions / targets, NA),
+    rz_catch_rate = ifelse(rz_targets >= 1, receptions / rz_targets, NA),
+    ez_catch_rate = ifelse(ez_targets >= 1, receptions / ez_targets, NA),
+    deep_catch_rate = ifelse(deep_targets >= 1, receptions / deep_targets, NA),
+
+    "rec_td_1" = sum(
+      .data$td_player_id == .data$receiver_player_id &
+        yards_gained <= 19,
+      na.rm = TRUE
+    ),
+    "rec_td_20" = sum(
+      .data$td_player_id == .data$receiver_player_id &
+        yards_gained >= 20 & yards_gained <= 49,
+      na.rm = TRUE
+    ),
+    "rec_td_50" = sum(
+      .data$td_player_id == .data$receiver_player_id &
+        yards_gained >= 50,
+      na.rm = TRUE
+    ),
+    "rec_yds_100" = sum(ifelse(rec_yds >= 100 &
+                                 rec_yds < 150, 1, 0)),
+    "rec_yds_150" = sum(ifelse(rec_yds >= 150 &
+                                 rec_yds < 200, 1, 0)),
+    "rec_yds_200" = sum(ifelse(rec_yds >= 200, 1, 0))
+  ) %>%
+  dplyr::rename(player_id = .data$receiver_player_id) %>%
+  dplyr::ungroup()
+
+rec_nas <- is.na(rec)
+rec[rec_nas] <- 0
+
+st <- pbp %>%
+  dplyr::filter(.data$special == 1 & !is.na(.data$td_player_id)) %>%
+  dplyr::group_by(.data$td_player_id, .data$week, .data$season) %>%
+  dplyr::summarise(
+    name_st = .data$td_player_name,
+    team_st = .data$td_team,
+    "st_td_1" = sum(.data$touchdown &
+                      return_yards <= 9, na.rm = TRUE),
+    "st_td_10" = sum(.data$touchdown &
+                       return_yards >= 10 & return_yards <= 29, na.rm = TRUE),
+    "st_td_30" = sum(.data$touchdown &
+                       return_yards >= 30 & return_yards <= 49, na.rm = TRUE),
+    "st_td_50" = sum(.data$touchdown &
+                       return_yards >= 50, na.rm = TRUE)
+  ) %>%
+  dplyr::rename(player_id = .data$td_player_id)
+
+add_stats <- pass %>%
+  full_join(rush, by = c("player_id", "week", "season")) %>%
+  full_join(rec, by = c("player_id", "week", "season")) %>%
+  full_join(st, by = c("player_id", "week", "season")) %>%
+  dplyr::mutate(
+    player_name = dplyr::case_when(
+      !is.na(.data$name_pass) ~ .data$name_pass,
+      !is.na(.data$name_rush) ~ .data$name_rush,
+      !is.na(.data$name_receiver) ~ .data$name_receiver,
+      TRUE ~ .data$name_st
+    ),
+    recent_team = dplyr::case_when(
+      !is.na(.data$team_pass) ~ .data$team_pass,
+      !is.na(.data$team_rush) ~ .data$team_rush,
+      !is.na(.data$team_receiver) ~ .data$team_receiver,
+      TRUE ~ .data$name_st
+    )
+  ) %>%
+  dplyr::select(tidyselect::any_of(
+    c(
+      # id information
+      "player_id",
+      "player_name",
+      "recent_team",
+      "position",
+      "season",
+      "week",
+      # passing stats
+      "rz_attempts",
+      "ez_attempts",
+      "ez_attempts_inside_rz",
+      "ez_attempts_outside_rz",
+      "deep_attempts",
+      "rz_completion_pct",
+      "ez_completion_pct",
+      "deep_completion_pct",
+      "pass_td_1",
+      "pass_td_20",
+      "pass_td_50",
+      "int_tds",
+      "pass_yds_300",
+      "pass_yds_350",
+      "pass_yds_400",
+      
+      # rushing stats
+      "outside_rz_carries",
+      "rz_carries",
+      "inside_ten_carries",
+      "inside_five_carries",
+      "neutral_carries",
+      "rush_td_1",
+      "rush_td_10",
+      "rush_td_30",
+      "rush_td_50",
+      "rush_yds_100",
+      "rush_yds_150",
+      "rush_yds_200",
+      
+      # receiving stats
+      "rz_targets",
+      "ez_targets",
+      "ez_targets_inside_rz",
+      "ez_targets_outside_rz",
+      "deep_targets",
+      "catch_rate",
+      "adot",
+      "rz_catch_rate",
+      "ez_catch_rate",
+      "deep_catch_rate",
+      "rec_yds_100",
+      "rec_yds_150",
+      "rec_yds_200",
+      "rec_td_1",
+      "rec_td_20",
+      "rec_td_50",
+      
+      # st stats
+      "st_td_1",
+      "st_td_10",
+      "st_td_30",
+      "st_td_50"
+    )
+  )) %>%
+  dplyr::filter(!is.na(.data$player_id))
+
+add_stats_nas <- is.na(add_stats)
+add_stats[add_stats_nas] <- 0
 ```
 
-The pattern argument uses regular expressions. You can use a caret ^ to match the beginning of the string:
+Join added stats to weekly stats along with roster, snap, and injury data
 ```{r}
-rm(list=ls(pattern="^tp_"))
-rm(list=setdiff(ls(pattern = "^tp_"), lsf.str()))
-```
-Other patterns for managing temporary items / keeping clean workspaces than name prefixes.
-```{r}
-temp<-new.env()
-temp$x <- 1
-temp$y <- 2
-with(temp,x+y)
-#> 3
-rm(temp)
+joined_wkly <- raw_wkly %>% filter(week <= 17) %>%
+  left_join(add_stats %>% select(-player_name, -recent_team),
+            by = c("player_id", "week", "season")) %>%
+  group_by(player_id, season, week) %>%
+  mutate(
+    touches = sum(targets, carries, na.rm = TRUE),
+    total_yards = sum(passing_yards, rushing_yards, receiving_yards),
+    total_tds = sum(passing_tds, rushing_tds, receiving_tds),
+    combo_yds_100 = ifelse(rushing_yards >= 50 &
+                             receiving_yards >= 50, 1, 0),
+    combo_yds_150 = ifelse(rushing_yards >= 75 &
+                             receiving_yards >= 75, 1, 0),
+    conversions = rushing_2pt_conversions + rushing_2pt_conversions + passing_2pt_conversions,
+    pass_pts =
+      10 * pass_td_1 +
+      15 * pass_td_20 +
+      20 * pass_td_50 +
+      10 * pass_yds_300 +
+      15 * pass_yds_350 +
+      25 * pass_yds_400+-5 * interceptions+-15 * int_tds +
+      3 * passing_2pt_conversions,
+    combo_pts =
+      10 * combo_yds_100 +
+      10 * combo_yds_150,
+    rush_pts =
+      10 * rush_td_1 +
+      15 * rush_td_10 +
+      20 * rush_td_30 +
+      25 * rush_td_50 +
+      10 * rush_yds_100 +
+      15 * rush_yds_150 +
+      25 * rush_yds_200 +
+      3 * rushing_2pt_conversions,
+    rec_pts =
+      10 * rec_td_1 +
+      15 * rec_td_20 +
+      20 * rec_td_50 +
+      10 * rec_yds_100 +
+      15 * rec_yds_150 +
+      25 * rec_yds_200 +
+      3 * receiving_2pt_conversions,
+    st_pts =
+      10 * st_td_1 +
+      15 * st_td_10 +
+      20 * st_td_30 +
+      25 * st_td_50,
+    nw_pts = pass_pts + rush_pts + rec_pts + st_pts + combo_pts,
+    rush_pts = rush_pts + (combo_pts / 2),
+    rec_pts = rec_pts + (combo_pts / 2),
+  ) %>% 
+  left_join(rosters %>% select(-team),
+            by = c("player_id" = "gsis_id", "season")) %>%
+  left_join(cleaned_injuries, by = c("player_id", "season", "week")) %>% 
+  mutate(nw_position = case_when(position == 'TE'| position == 'WR' ~ 'WR/TE', 
+                                 position == 'FB' ~ 'RB',
+                                 TRUE ~ position))
+
+
+# remove duplicate rows
+joined_wkly <- subset(joined_wkly, !duplicated(subset(joined_wkly, select=c(player_id, season, week))))
 ```
 
-Steve Smith needs to be fixed, plays 32 games in season stats
+Remove stale objects
+```{r}
+rm(add_stats_nas, pass, pass_nas, raw_injuries, rec, rec_nas, rush, rush_nas, st)
+```
+
+Clean weekly stats
+```{r}
+cleaned_wkly <-
+  joined_wkly[, c(
+    "player_id",
+    "season",
+    "week",
+    "full_name",
+    "recent_team",
+    "position",
+    pass_cols,
+    rush_cols,
+    rec_cols,
+    combo_cols,
+    st_cols,
+    snaps_cols,
+    fantasy_cols,
+    "nw_position"
+    )]
+
+cleaned_wkly_nas <- is.na(cleaned_wkly)
+cleaned_wkly[cleaned_wkly_nas] <- 0
+```
+
+Agggregate stats
+```{r}
+season <- cleaned_wkly %>%
+  ungroup() %>%
+  dplyr::group_by(.data$player_id, season) %>%
+  dplyr::summarise(
+    full_name = last(.data$full_name),
+    games = dplyr::n(),
+    recent_team = dplyr::last(.data$recent_team),
+    position = dplyr::last(.data$position),
+    # passing
+    completions = sum(.data$completions),
+    attempts = sum(.data$attempts),
+    passing_yards = sum(.data$passing_yards),
+    passing_tds = sum(.data$passing_tds),
+    interceptions = sum(.data$interceptions),
+    sacks = sum(.data$sacks),
+    passing_air_yards = sum(.data$passing_air_yards),
+    passing_yards_after_catch = sum(.data$passing_yards_after_catch),
+    passing_first_downs = sum(.data$passing_first_downs),
+    passing_epa = dplyr::if_else(all(is.na(.data$passing_epa)), NA_real_, sum(.data$passing_epa, na.rm = TRUE)),
+    rz_attempts = sum(rz_attempts),
+    ez_attempts = sum(ez_attempts),
+    ez_attempts_inside_rz = sum(ez_attempts_inside_rz),
+    ez_attempts_outside_rz = sum(ez_attempts_outside_rz),
+    deep_attempts = sum(deep_attempts),
+    rz_completion_pct = mean(rz_completion_pct),
+    ez_completion_pct = mean(ez_completion_pct),
+    deep_completion_pct = mean(deep_completion_pct),
+    pass_yds_300 = sum(pass_yds_300),
+    pass_yds_350 = sum(pass_yds_350),
+    pass_yds_400 = sum(pass_yds_400),
+    pass_td_1 = sum(pass_td_1),
+    pass_td_20 = sum(pass_td_20),
+    pass_td_50 = sum(pass_td_50),
+    int_tds = sum(int_tds),
+    
+    # rushing
+    carries = sum(.data$carries),
+    rushing_yards = sum(.data$rushing_yards),
+    rushing_tds = sum(.data$rushing_tds),
+    rushing_first_downs = sum(.data$rushing_first_downs),
+    rushing_epa = dplyr::if_else(all(is.na(.data$rushing_epa)), NA_real_, sum(.data$rushing_epa, na.rm = TRUE)),
+    touches = sum(touches),
+    rz_carries = sum(rz_carries),
+    outside_rz_carries = sum(outside_rz_carries),
+    inside_ten_carries = sum(inside_ten_carries),
+    inside_five_carries = sum(inside_five_carries),
+    neutral_carries = sum(neutral_carries),
+    rush_yds_100 = sum(rush_yds_100),
+    rush_yds_150 = sum(rush_yds_150),
+    rush_yds_200 = sum(rush_yds_200),
+    rush_td_1 = sum(rush_td_1),
+    rush_td_10 = sum(rush_td_10),
+    rush_td_30 = sum(rush_td_30),
+    rush_td_50 = sum(rush_td_50),
+    combo_yds_100 = sum(combo_yds_100),
+    combo_yds_150 = sum(combo_yds_150),
+    
+    # receiving
+    receptions = sum(.data$receptions),
+    targets = sum(.data$targets),
+    receiving_yards = sum(.data$receiving_yards),
+    receiving_tds = sum(.data$receiving_tds),
+    receiving_air_yards = sum(.data$receiving_air_yards),
+    receiving_yards_after_catch = sum(.data$receiving_yards_after_catch),
+    receiving_first_downs = sum(.data$receiving_first_downs),
+    receiving_epa = dplyr::if_else(all(is.na(
+      .data$receiving_epa
+    )), NA_real_, sum(.data$receiving_epa, na.rm = TRUE)),
+    rz_targets = sum(rz_targets),
+    outside_rz_targets = sum(targets - rz_targets),
+    ez_targets = sum(ez_targets),
+    ez_targets_inside_rz = sum(ez_targets_inside_rz),
+    ez_targets_outside_rz = sum(ez_targets_outside_rz),
+    rz_targets = sum(rz_targets),
+    deep_targets = sum(deep_targets),
+    adot = mean(adot),
+    catch_rate = mean(catch_rate),
+    rz_catch_rate = mean(rz_catch_rate),
+    ez_catch_rate = mean(ez_catch_rate),
+    deep_catch_rate = mean(deep_catch_rate),
+    rec_yds_100 = sum(rec_yds_100),
+    rec_yds_150 = sum(rec_yds_150),
+    rec_yds_200 = sum(rec_yds_200),
+    rec_td_1 = sum(rec_td_1),
+    rec_td_20 = sum(rec_td_20),
+    rec_td_50 = sum(rec_td_50),
+    
+    # snaps
+    total_snaps = sum(total_snaps),
+    offense_snaps = sum(offense_snaps),
+    offense_snap_rate = mean(offense_snap_rate),
+    
+    # fantasy
+    rush_pts = sum(rush_pts),
+    rec_pts = sum(rec_pts),
+    pass_pts = sum(pass_pts),
+    nw_pts = sum(nw_pts),
+    fantasy_points = sum(.data$fantasy_points),
+    fantasy_points_ppr = sum(fantasy_points_ppr),
+    
+    # per game
+    attempts_per_game = attempts/games,
+    targets_per_game = targets/games,
+    carries_per_game = carries/games,
+    touches_per_game = touches/games,
+    nw_pts_per_game = nw_pts/games
+    
+  ) %>%
+  arrange(-nw_pts) %>%
+  dplyr::group_by(position, season) %>%
+  dplyr::mutate(nw_rk = 1:n()) %>%
+  arrange(-fantasy_points) %>%
+  dplyr::mutate(std_rk = 1:n()) %>%
+  ungroup()
+```
+
+Season averages
+```{r}
+rb_totals <- cleaned_wkly %>% 
+  group_by(season, week, recent_team, position) %>% 
+  filter(position == "RB") %>% 
+  summarise(
+    rb_targets = sum(targets),
+    rb_carries = sum(carries),
+    rb_touches = sum(touches),
+    rb_offense_snaps = sum(offense_snaps),
+    rb_rush_pts = sum(rush_pts),
+    rb_nw_pts = mean(nw_pts))
+
+rbs <- cleaned_wkly %>% filter(position == "RB") %>% 
+  left_join(rb_totals, by = c("season", "week", "recent_team", "position")) %>% 
+  summarise(rb_target_share = targets/rb_targets,
+         rb_carry_share = carries/rb_carries,
+         rb_touch_share = touches/rb_touches)
+
+rb_avg <- rbs %>% group_by(player_id, season) %>% 
+  summarise(
+    full_name = last(.data$full_name),
+    games = dplyr::n(),
+    recent_team = dplyr::last(.data$recent_team),
+    position = dplyr::last(.data$position),
+    avg_target_share = mean(rb_target_share))
+```
+
+Weighted opportunites
+```{r}
+rb_sums <- team_sums %>% filter(position == "RB")
+
+qualified_rbs <- season %>% filter(position == "RB", touches_per_game > 8)
+
+rbs <- 
+  qualified_rbs[,"season", "player_name", "recent_team", rush_cols, combo_cols, snaps_cols, fantasy_cols]
+
+qualified_rbs <- qual
+
+player_ids <-
+  joined_wkly[, c("player_id", "season", "week", "recent_team", id_cols)]
+
+
+rb_tbl <- 
+  qualified_rbs[, c("season", "player_name", "recent_team", add_rush_cols)]
+
+```
+
+Create dataframe columns
+```{r}
+players <- distinct(joined_wkly[, c(1:5)])
+
+id_cols <-
+  c(
+    "espn_id",
+    "sportradar_id",
+    "yahoo_id",
+    "rotowire_id",
+    "pff_id",
+    "fantasy_data_id",
+    "sleeper_id"
+  )
+
+pass_cols <- c(
+  "completions",
+  "attempts",
+  "passing_yards",
+  "passing_tds",
+  "interceptions",
+  "sacks",
+  "passing_air_yards",
+  "passing_yards_after_catch",
+  "passing_first_downs",
+  "passing_epa",
+  "dakota",
+  "rz_attempts",
+  "ez_attempts",
+  "ez_attempts_inside_rz",
+  "ez_attempts_outside_rz",
+  "deep_attempts",
+  "rz_completion_pct",
+  "ez_completion_pct",
+  "deep_completion_pct",
+  "pass_td_1",
+  "pass_td_20",
+  "pass_td_50",
+  "int_tds",
+  "pass_yds_300",
+  "pass_yds_350",
+  "pass_yds_400"
+  )
+
+rush_cols <- c(
+  "carries",
+  "rushing_yards",
+  "rushing_tds",
+  "rushing_first_downs",
+  "rushing_epa",
+  "outside_rz_carries",
+  "rz_carries",
+  "inside_ten_carries",
+  "inside_five_carries",
+  "neutral_carries",
+  "rush_td_1",
+  "rush_td_10",
+  "rush_td_30",
+  "rush_td_50",
+  "rush_yds_100",
+  "rush_yds_150",
+  "rush_yds_200"
+)
+
+rec_cols <- c(
+  "receptions",
+  "targets",
+  "receiving_yards",
+  "receiving_tds",
+  "receiving_air_yards",
+  "receiving_yards_after_catch",
+  "receiving_first_downs",
+  "receiving_epa",
+  "rz_targets",
+  "ez_targets",
+  "ez_targets_inside_rz",
+  "ez_targets_outside_rz",
+  "deep_targets",
+  "adot",
+  "catch_rate",
+  "rz_catch_rate",
+  "ez_catch_rate",
+  "deep_catch_rate",
+  "rec_yds_100",
+  "rec_yds_150",
+  "rec_yds_200",
+  "rec_td_1",
+  "rec_td_20",
+  "rec_td_50"
+)
+
+st_cols <- c("st_td_1",
+             "st_td_10",
+             "st_td_30",
+             "st_td_50")
+
+fantasy_cols <- c("nw_pts", "rush_pts", "rec_pts", "pass_pts", "fantasy_points", "fantasy_points_ppr")
+
+combo_cols <- c("touches", "total_yards", "total_tds", "combo_yds_100", "combo_yds_150")
+
+game_cols <- c("game_id", "opp", "team_score", "opp_score", "location", "spread_line", "team_coach", "away_coach")
+
+adp_cols <- c("pick", "overall")
+snaps_cols <- c("total_snaps", "offense_snaps",  "offense_snap_rate")
+injury_cols <- c("active_inactive", "game_designation", "injury_type", "started")
+```
+
