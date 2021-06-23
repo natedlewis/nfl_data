@@ -5,16 +5,33 @@ date: "2021-06-09"
 output: github_document
 ---
 
-Load libraries
-```{r message=FALSE}
+```{r Load libraries, message=FALSE}
 library(nflfastR)
 library(tidyverse)
 library(qs)
 library(glue)
 ```
 
-Load helper functions
-```{r}
+```{r Load data, message=FALSE}
+
+# Play by play
+future::plan("multisession")
+pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
+  progressr::with_progress()
+
+# Change notation
+options(scipen = 9999)
+
+# Filter out dead plays and post season games
+data <- pbp %>%
+  dplyr::filter(
+    season_type == "REG",
+    !is.na(.data$down),
+    .data$play_type %in% c("pass", "qb_kneel", "qb_spike", "run")
+  ) %>%
+  decode_player_ids()
+
+# load helper functions
 clean_games <- function(g) {
   g1 <- games %>%
     rename(
@@ -71,30 +88,16 @@ scrape_page <- function(page){
     read_csv(glue("https://raw.githubusercontent.com/jchernak96/NFL-Injury-Data-PFR-/master/Data/PFR_{page}_Injuries.csv"))
   }
 
-```
-
-Load data
-```{r message=FALSE}
-
-# Play by play
-future::plan("multisession")
-pbp <- nflfastR::load_pbp(2010:2020, qs = TRUE) %>% 
-  progressr::with_progress()
-
-# Change notation
-options(scipen = 9999)
-
-# Filter out dead plays and post season games
-data <- pbp %>%
-  dplyr::filter(
-    season_type == "REG",
-    !is.na(.data$down),
-    .data$play_type %in% c("pass", "qb_kneel", "qb_spike", "run")
-  ) %>%
-  decode_player_ids()
-
 # Load roster data
-rosters <- fast_scraper_roster(2010:2021)
+raw_rosters <- fast_scraper_roster(2010:2021)
+
+# load dynastyprocess player ids
+player_ids <- read_csv("https://raw.githubusercontent.com/dynastyprocess/data/master/files/db_playerids.csv") %>% select(gsis_id, age, fantasypros_id, draft_year, draft_round, draft_pick) %>% filter(!is.na(gsis_id)) %>% rename(current_age = age)
+
+rosters <- raw_rosters %>% left_join(player_ids, by = c("gsis_id")) %>% mutate(db_season = 2021,
+                                                                               age_mod = db_season - season,
+                                                                               age = current_age - age_mod,
+                                                                               years_exp = season - draft_year)
 
 # Load basic weeekly stats
 raw_wkly <- calculate_player_stats(pbp, weekly = TRUE) %>% 
@@ -120,7 +123,6 @@ games <- clean_games(games) %>% select(
 # Load ADP data
 adp <- read_csv("adp_all.csv") %>% rename(player_id = gsis_id)
 
-
 # scrape raw injury data from pfr
 raw_injuries <- 
   tibble(year = 2010:2020) %>% 
@@ -137,8 +139,7 @@ cleaned_injuries <- subset(raw_injuries, !duplicated(subset(raw_injuries, select
   rename(player_id = gsis_id)
 ```
 
-Create additional passing stats
-```{r}
+```{r Create advanced metrics}
 pass <- data %>%
   dplyr::filter(.data$play_type %in% c("pass", "qb_spike")) %>%
   dplyr::group_by(.data$passer_player_id, .data$week, .data$season) %>%
@@ -151,35 +152,60 @@ pass <- data %>%
     ),
     completions = sum(.data$complete_pass == 1),
     pass_yds = sum(yards_gained),
-    rz_attempts = sum(.data$attempts & yardline_100 <= 20, na.rm = TRUE),
+    outside_rz_attempts = sum(.data$attempts & .data$yardline_100 >= 20, na.rm = TRUE),
+    rz_attempts = sum(.data$attempts & .data$yardline_100 < 20, na.rm = TRUE),
     ez_attempts = sum(.data$attempts &
-                   .data$yardline_100 == .data$air_yards, na.rm = TRUE),
+                        .data$yardline_100 == .data$air_yards, na.rm = TRUE),
     ez_attempts_inside_rz = sum(
       .data$attempts &
-        .data$yardline_100 == .data$air_yards,
-      yardline_100 <= 20,
-      na.rm = TRUE
+        .data$yardline_100 == .data$air_yards & .data$yardline_100 < 20, na.rm = TRUE
     ),
     ez_attempts_outside_rz = sum(
       .data$attempts &
-        .data$yardline_100 == .data$air_yards,
-      yardline_100 > 20,
-      na.rm = TRUE
+        .data$yardline_100 == .data$air_yards & .data$yardline_100 >= 20, na.rm = TRUE
     ),
     deep_attempts = sum(.data$attempts &
-                     .data$air_yards >= 20, na.rm = TRUE),
-    rz_completions = sum(.data$complete_pass == 1 &
-                   yardline_100 <= 20, na.rm = TRUE),
+                          .data$air_yards >= 20, na.rm = TRUE),
+    short_attempts = sum(.data$attempts &
+                           .data$air_yards <= 5, na.rm = TRUE),
+    neutral_attempts = sum(
+      attempts &
+        .data$wp > .20 &
+        .data$wp < .80 &
+        .data$down <= 2 &
+        .data$qtr <= 2 & .data$half_seconds_remaining > 120,
+      na.rm = TRUE
+    ),
+    garbadge_time_attempts = sum(attempts &
+                                   .data$wp >= .95 |
+                                   .data$wp <= 0.05, na.rm = TRUE),
+    rz_completions = sum(.data$completions &
+                           yardline_100 < 20, na.rm = TRUE),
     ez_completions = sum(
-      .data$complete_pass == 1 &
+      .data$completions &
         .data$yardline_100 == .data$air_yards,
       na.rm = TRUE
     ),
-    deep_completions = sum(.data$complete_pass == 1 &
-                     .data$air_yards >= 20, na.rm = TRUE),
+    ez_completions_inside_rz = sum(
+      .data$completions &
+        .data$yardline_100 == .data$air_yards &
+        yardline_100 < 20,
+      na.rm = TRUE
+    ),
+    ez_completions_outside_rz = sum(
+      .data$completions &
+        .data$yardline_100 == .data$air_yards &
+        yardline_100 >= 20,
+      na.rm = TRUE
+    ),
+    deep_completions = sum(.data$completions &
+                             .data$air_yards >= 20, na.rm = TRUE),
+    short_completions = sum(.data$completions &
+                              .data$air_yards >= 5, na.rm = TRUE),
     rz_completion_pct = ifelse(rz_attempts >= 1, rz_completions / rz_attempts, NA),
     ez_completion_pct = ifelse(ez_attempts >= 1, ez_completions / ez_attempts, NA),
     deep_completion_pct = ifelse(deep_attempts >= 1, deep_completions / deep_attempts, NA),
+    short_completion_pct = ifelse(short_attempts >= 1, short_completions / short_attempts, NA),
     "pass_td_1" = sum(
       .data$touchdown == 1 &
         .data$td_team == .data$posteam &
@@ -220,10 +246,10 @@ rush <- data %>%
     team_rush = dplyr::first(.data$posteam),
     carries = dplyr::n(),
     rush_yds = sum(yards_gained),
-    rz_carries = sum(carries & .data$yardline_100 <= 20),
-    outside_rz_carries = sum(carries & .data$yardline_100 > 20),
-    inside_five_carries = sum(carries & .data$yardline_100 < 5),
-    inside_ten_carries = sum(carries & .data$yardline_100 < 10),
+    rz_carries = sum(carries & .data$yardline_100 < 20, na.rm = TRUE),
+    outside_rz_carries = sum(carries & .data$yardline_100 >= 20, na.rm = TRUE),
+    inside_five_carries = sum(carries & .data$yardline_100 < 5, na.rm = TRUE),
+    inside_ten_carries = sum(carries & .data$yardline_100 < 10, na.rm = TRUE),
     neutral_carries = sum(
       carries &
         .data$wp > .20 &
@@ -232,6 +258,9 @@ rush <- data %>%
         .data$qtr <= 2 & .data$half_seconds_remaining > 120,
       na.rm = TRUE
     ),
+    garbadge_time_carries = sum(carries &
+                                  .data$wp >= .95 |
+                                  .data$wp <= 0.05, na.rm = TRUE),
     "rush_td_1" = sum(
       .data$td_player_id == .data$rusher_player_id &
         .data$yards_gained <= 9,
@@ -272,27 +301,56 @@ rec <- data %>%
     team_receiver = dplyr::first(.data$posteam),
     targets = dplyr::n(),
     receptions = sum(.data$complete_pass == 1),
+    rz_receptions = sum(.data$complete_pass == 1 &
+                          yardline_100 < 20, na.rm = TRUE),
+    ez_receptions = sum(.data$complete_pass == 1 &
+                          .data$yardline_100 == .data$air_yards, na.rm = TRUE),
+    ez_receptions_inside_rz = sum(
+      .data$complete_pass == 1 &
+        .data$yardline_100 == .data$air_yards & yardline_100 < 20, na.rm = TRUE
+    ),
+    ez_receptions_outside_rz = sum(
+      .data$complete_pass == 1 &
+        .data$yardline_100 == .data$air_yards & yardline_100 >= 20, na.rm = TRUE
+    ),
+    
+    deep_receptions = sum(.data$complete_pass == 1 &
+                            .data$air_yards >= 20, na.rm = TRUE),
+    short_receptions = sum(.data$complete_pass == 1 &
+                             .data$air_yards >= 5, na.rm = TRUE),
     rec_yds = sum(yards_gained),
-    rz_targets = sum(.data$targets & yardline_100 <= 20),
-    outside_rz_targets = sum(.data$targets & yardline_100 > 20),
+    rz_targets = sum(.data$targets & yardline_100 < 20, na.rm = TRUE),
+    outside_rz_targets = sum(.data$targets & yardline_100 >= 20, na.rm = TRUE),
     ez_targets = sum(.data$targets &
-                    .data$yardline_100 == .data$air_yards),
+                       .data$yardline_100 == .data$air_yards, na.rm = TRUE),
     ez_targets_inside_rz = sum(
       .data$targets &
-        .data$yardline_100 == .data$air_yards & yardline_100 <= 20
+        .data$yardline_100 == .data$air_yards & yardline_100 < 20, na.rm = TRUE
     ),
     ez_targets_outside_rz = sum(
       .data$targets &
-        .data$yardline_100 == .data$air_yards & yardline_100 > 20
+        .data$yardline_100 == .data$air_yards & yardline_100 >= 20, na.rm = TRUE
     ),
-    deep_targets = sum(.data$targets & .data$air_yards >= 20),
+    deep_targets = sum(.data$targets & .data$air_yards >= 20, na.rm = TRUE),
+    short_targets = sum(.data$targets & .data$air_yards >= 5, na.rm = TRUE),
+    neutral_targets = sum(
+      targets &
+        .data$wp > .20 &
+        .data$wp < .80 &
+        .data$down <= 2 &
+        .data$qtr <= 2 & .data$half_seconds_remaining > 120,
+      na.rm = TRUE
+    ),
+    garbadge_time_targets = sum(targets &
+                                  .data$wp >= .95 |
+                                  .data$wp <= 0.05, na.rm = TRUE),
     receiving_air_yards = sum(.data$air_yards, na.rm = TRUE),
     adot = ifelse(targets >= 1, receiving_air_yards / targets, NA),
     catch_rate = ifelse(targets >= 1, receptions / targets, NA),
-    rz_catch_rate = ifelse(rz_targets >= 1, receptions / rz_targets, NA),
-    ez_catch_rate = ifelse(ez_targets >= 1, receptions / ez_targets, NA),
-    deep_catch_rate = ifelse(deep_targets >= 1, receptions / deep_targets, NA),
-
+    rz_catch_rate = ifelse(rz_targets >= 1, rz_receptions / rz_targets, NA),
+    ez_catch_rate = ifelse(ez_targets >= 1, ez_receptions / ez_targets, NA),
+    deep_catch_rate = ifelse(deep_targets >= 1, deep_receptions / deep_targets, NA),
+    short_catch_rate = ifelse(short_targets >= 1, short_receptions / short_targets, NA),
     "rec_td_1" = sum(
       .data$td_player_id == .data$receiver_player_id &
         yards_gained <= 19,
@@ -329,9 +387,11 @@ st <- pbp %>%
     "st_td_1" = sum(.data$touchdown &
                       return_yards <= 9, na.rm = TRUE),
     "st_td_10" = sum(.data$touchdown &
-                       return_yards >= 10 & return_yards <= 29, na.rm = TRUE),
+                       return_yards >= 10 &
+                       return_yards <= 29, na.rm = TRUE),
     "st_td_30" = sum(.data$touchdown &
-                       return_yards >= 30 & return_yards <= 49, na.rm = TRUE),
+                       return_yards >= 30 &
+                       return_yards <= 49, na.rm = TRUE),
     "st_td_50" = sum(.data$touchdown &
                        return_yards >= 50, na.rm = TRUE)
   ) %>%
@@ -364,15 +424,20 @@ add_stats <- pass %>%
       "position",
       "season",
       "week",
+      
       # passing stats
       "rz_attempts",
       "ez_attempts",
       "ez_attempts_inside_rz",
       "ez_attempts_outside_rz",
       "deep_attempts",
+      "short_attempts",
+      "neutral_attempts",
+      "garbadge_time_attempts",
       "rz_completion_pct",
       "ez_completion_pct",
       "deep_completion_pct",
+      "short_completion_pct",
       "pass_td_1",
       "pass_td_20",
       "pass_td_50",
@@ -387,6 +452,7 @@ add_stats <- pass %>%
       "inside_ten_carries",
       "inside_five_carries",
       "neutral_carries",
+      "garbadge_time_carries",
       "rush_td_1",
       "rush_td_10",
       "rush_td_30",
@@ -401,11 +467,15 @@ add_stats <- pass %>%
       "ez_targets_inside_rz",
       "ez_targets_outside_rz",
       "deep_targets",
+      "short_targets",
+      "neutral_targets",
+      "garbadge_time_targets",
       "catch_rate",
       "adot",
       "rz_catch_rate",
       "ez_catch_rate",
       "deep_catch_rate",
+      "short_catch_rate",
       "rec_yds_100",
       "rec_yds_150",
       "rec_yds_200",
@@ -426,8 +496,8 @@ add_stats_nas <- is.na(add_stats)
 add_stats[add_stats_nas] <- 0
 ```
 
-Join added stats to weekly stats along with roster, snap, and injury data
-```{r}
+Join advanced metrics to base stats along with roster, snap, and injury data
+```{r Joined weekly stats}
 joined_wkly <- raw_wkly %>% filter(week <= 17) %>%
   left_join(add_stats %>% select(-player_name, -recent_team),
             by = c("player_id", "week", "season")) %>%
@@ -447,7 +517,9 @@ joined_wkly <- raw_wkly %>% filter(week <= 17) %>%
       20 * pass_td_50 +
       10 * pass_yds_300 +
       15 * pass_yds_350 +
-      25 * pass_yds_400+-5 * interceptions+-15 * int_tds +
+      25 * pass_yds_400 +
+      -5 * interceptions +
+      -15 * int_tds +
       3 * passing_2pt_conversions,
     combo_pts =
       10 * combo_yds_100 +
@@ -485,43 +557,152 @@ joined_wkly <- raw_wkly %>% filter(week <= 17) %>%
                                  position == 'FB' ~ 'RB',
                                  TRUE ~ position))
 
-
 # remove duplicate rows
 joined_wkly <- subset(joined_wkly, !duplicated(subset(joined_wkly, select=c(player_id, season, week))))
 ```
 
-Remove stale objects
-```{r}
-rm(add_stats_nas, pass, pass_nas, raw_injuries, rec, rec_nas, rush, rush_nas, st)
+```{r Weekly stats}
+wkly <-
+  joined_wkly %>% 
+  filter(position %in% c("QB", "RB", "WR", "TE", "FB")) %>% 
+  dplyr::select(tidyselect::any_of(
+    c(
+      
+      # basic info
+      "season",
+      "week",
+      "full_name",
+      "recent_team",
+      "position",
+
+      # passing
+      "completions",
+      "attempts",
+      "passing_yards",
+      "passing_tds",
+      "interceptions",
+      "sacks",
+      "passing_air_yards",
+      "passing_yards_after_catch",
+      "passing_first_downs",
+      "outside_rz_attempts",
+      "rz_attempts",
+      "ez_attempts",
+      "ez_attempts_inside_rz",
+      "ez_attempts_outside_rz",
+      "deep_attempts",
+      "short_attempts",
+      "neutral_attempts",
+      "garbadge_time_attempts",
+      "rz_completion_pct",
+      "ez_completion_pct",
+      "deep_completion_pct",
+      "short_completion_pct",
+      "pass_yds_300",
+      "pass_yds_350",
+      "pass_yds_400",
+      "pass_td_1",
+      "pass_td_20",
+      "pass_td_50",
+      "int_tds",
+
+      # rushing
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "rushing_first_downs",
+      "outside_rz_carries",
+      "rz_carries",
+      "inside_ten_carries",
+      "inside_five_carries",
+      "neutral_carries",
+      "garbadge_time_carries",
+      "rush_td_1",
+      "rush_td_10",
+      "rush_td_30",
+      "rush_td_50",
+      "rush_yds_100",
+      "rush_yds_150",
+      "rush_yds_200",
+      
+      # receiving stats
+      "receptions",
+      "targets",
+      "receiving_yards",
+      "receiving_tds",
+      "receiving_air_yards",
+      "receiving_yards_after_catch",
+      "receiving_first_downs",
+      "rz_targets",
+      "ez_targets",
+      "ez_targets_inside_rz",
+      "ez_targets_outside_rz",
+      "deep_targets",
+      "short_targets",
+      "neutral_targets",
+      "garbadge_time_targets",
+      "adot",
+      "catch_rate",
+      "rz_catch_rate",
+      "ez_catch_rate",
+      "deep_catch_rate",
+      "short_catch_rate",
+      "rec_yds_100",
+      "rec_yds_150",
+      "rec_yds_200",
+      "rec_td_1",
+      "rec_td_20",
+      "rec_td_50",
+      
+      # st stats
+      "st_td_1",
+      "st_td_10",
+      "st_td_30",
+      "st_td_50",
+      
+      # combo
+      "touches",
+      "combo_yds_100",
+      "combo_yds_150",
+      "total_yards",
+      "total_tds",
+      
+      # snaps
+      "offense_snaps",
+      "offense_snap_rate",
+      
+      # fantasy
+      "pass_pts",
+      "rec_pts",
+      "rush_pts",
+      "st_pts",
+      "nw_pts",
+      "fantasy_points",
+      "fantasy_points_ppr",
+      
+      # injury stats
+      "game_designation",
+      "started",
+      
+      # secondary info
+      "player_id",
+      "nw_position",
+      "years_exp",
+      "age",
+      "draft_year",
+      "draft_round",
+      "draft_pick"
+    )
+  )) %>% ungroup()
 ```
 
-Clean weekly stats
-```{r}
-cleaned_wkly <-
-  joined_wkly[, c(
-    "player_id",
-    "season",
-    "week",
-    "full_name",
-    "recent_team",
-    "position",
-    pass_cols,
-    rush_cols,
-    rec_cols,
-    combo_cols,
-    st_cols,
-    snaps_cols,
-    fantasy_cols,
-    "nw_position"
-    )]
-
-cleaned_wkly_nas <- is.na(cleaned_wkly)
-cleaned_wkly[cleaned_wkly_nas] <- 0
-```
-
-Agggregate stats
-```{r}
-season <- cleaned_wkly %>%
+Aggregate stats, and will be adding the following:
+  - 
+  - weighted opportunities
+  - target/touch shares
+  - coefficients of variation (nw_pts, targets, rz_touches)
+```{r Season stats}
+season <- wkly %>%
   ungroup() %>%
   dplyr::group_by(.data$player_id, season) %>%
   dplyr::summarise(
@@ -529,6 +710,8 @@ season <- cleaned_wkly %>%
     games = dplyr::n(),
     recent_team = dplyr::last(.data$recent_team),
     position = dplyr::last(.data$position),
+    years_exp = last(years_exp),
+
     # passing
     completions = sum(.data$completions),
     attempts = sum(.data$attempts),
@@ -539,15 +722,18 @@ season <- cleaned_wkly %>%
     passing_air_yards = sum(.data$passing_air_yards),
     passing_yards_after_catch = sum(.data$passing_yards_after_catch),
     passing_first_downs = sum(.data$passing_first_downs),
-    passing_epa = dplyr::if_else(all(is.na(.data$passing_epa)), NA_real_, sum(.data$passing_epa, na.rm = TRUE)),
     rz_attempts = sum(rz_attempts),
     ez_attempts = sum(ez_attempts),
     ez_attempts_inside_rz = sum(ez_attempts_inside_rz),
     ez_attempts_outside_rz = sum(ez_attempts_outside_rz),
     deep_attempts = sum(deep_attempts),
+    short_attempts = sum(short_attempts),
+    neutral_attempts = sum(neutral_attempts),
+    garbadge_time_attempts = sum(garbadge_time_attempts),
     rz_completion_pct = mean(rz_completion_pct),
     ez_completion_pct = mean(ez_completion_pct),
     deep_completion_pct = mean(deep_completion_pct),
+    short_completion_pct = mean(short_completion_pct),
     pass_yds_300 = sum(pass_yds_300),
     pass_yds_350 = sum(pass_yds_350),
     pass_yds_400 = sum(pass_yds_400),
@@ -561,13 +747,13 @@ season <- cleaned_wkly %>%
     rushing_yards = sum(.data$rushing_yards),
     rushing_tds = sum(.data$rushing_tds),
     rushing_first_downs = sum(.data$rushing_first_downs),
-    rushing_epa = dplyr::if_else(all(is.na(.data$rushing_epa)), NA_real_, sum(.data$rushing_epa, na.rm = TRUE)),
     touches = sum(touches),
     rz_carries = sum(rz_carries),
     outside_rz_carries = sum(outside_rz_carries),
     inside_ten_carries = sum(inside_ten_carries),
     inside_five_carries = sum(inside_five_carries),
     neutral_carries = sum(neutral_carries),
+    garbadge_time_carries = sum(garbadge_time_carries),
     rush_yds_100 = sum(rush_yds_100),
     rush_yds_150 = sum(rush_yds_150),
     rush_yds_200 = sum(rush_yds_200),
@@ -586,21 +772,21 @@ season <- cleaned_wkly %>%
     receiving_air_yards = sum(.data$receiving_air_yards),
     receiving_yards_after_catch = sum(.data$receiving_yards_after_catch),
     receiving_first_downs = sum(.data$receiving_first_downs),
-    receiving_epa = dplyr::if_else(all(is.na(
-      .data$receiving_epa
-    )), NA_real_, sum(.data$receiving_epa, na.rm = TRUE)),
     rz_targets = sum(rz_targets),
     outside_rz_targets = sum(targets - rz_targets),
     ez_targets = sum(ez_targets),
     ez_targets_inside_rz = sum(ez_targets_inside_rz),
     ez_targets_outside_rz = sum(ez_targets_outside_rz),
-    rz_targets = sum(rz_targets),
     deep_targets = sum(deep_targets),
+    short_targets = sum(short_targets),
+    neutral_targets = sum(neutral_targets),
+    garbadge_time_targets = sum(garbadge_time_targets),
     adot = mean(adot),
     catch_rate = mean(catch_rate),
     rz_catch_rate = mean(rz_catch_rate),
     ez_catch_rate = mean(ez_catch_rate),
     deep_catch_rate = mean(deep_catch_rate),
+    short_catch_rate = mean(short_catch_rate),
     rec_yds_100 = sum(rec_yds_100),
     rec_yds_150 = sum(rec_yds_150),
     rec_yds_200 = sum(rec_yds_200),
@@ -609,7 +795,6 @@ season <- cleaned_wkly %>%
     rec_td_50 = sum(rec_td_50),
     
     # snaps
-    total_snaps = sum(total_snaps),
     offense_snaps = sum(offense_snaps),
     offense_snap_rate = mean(offense_snap_rate),
     
@@ -617,178 +802,586 @@ season <- cleaned_wkly %>%
     rush_pts = sum(rush_pts),
     rec_pts = sum(rec_pts),
     pass_pts = sum(pass_pts),
+    st_pts = sum(st_pts),
     nw_pts = sum(nw_pts),
     fantasy_points = sum(.data$fantasy_points),
     fantasy_points_ppr = sum(fantasy_points_ppr),
+    nw_position = last(nw_position),
     
     # per game
     attempts_per_game = attempts/games,
     targets_per_game = targets/games,
     carries_per_game = carries/games,
     touches_per_game = touches/games,
-    nw_pts_per_game = nw_pts/games
+    nw_pts_per_game = nw_pts/games,
+    nw_pts_per_touch = ifelse(touches > 0, nw_pts/touches, NA),
+    nw_pts_per_snap = ifelse(offense_snaps > 0, nw_pts/offense_snaps, NA),
     
+    # secondary info
+    age = last(age),
+    draft_year = last(draft_year),
+    draft_round = last(draft_round),
+    draft_pick = last(draft_pick)
   ) %>%
   arrange(-nw_pts) %>%
-  dplyr::group_by(position, season) %>%
+  dplyr::group_by(nw_position, season) %>%
   dplyr::mutate(nw_rk = 1:n()) %>%
   arrange(-fantasy_points) %>%
   dplyr::mutate(std_rk = 1:n()) %>%
-  ungroup()
+  ungroup() %>% 
+  mutate(across(where(is.numeric), round, 2))
 ```
 
-Season averages
-```{r}
-rb_totals <- cleaned_wkly %>% 
-  group_by(season, week, recent_team, position) %>% 
+```{r Subset season stats by position, echo=FALSE}
+# Running backs ----
+rbs <-
+  season %>%
   filter(position == "RB") %>% 
-  summarise(
-    rb_targets = sum(targets),
-    rb_carries = sum(carries),
-    rb_touches = sum(touches),
-    rb_offense_snaps = sum(offense_snaps),
-    rb_rush_pts = sum(rush_pts),
-    rb_nw_pts = mean(nw_pts))
+  dplyr::select(tidyselect::any_of(
+    c(
+      # basic info
+      "nw_rk",
+      "season",
+      "full_name",
+      "recent_team",
+      "position",
+      "games",
+      
+      # rushing
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "rushing_first_downs",
+      "rushing_epa",
+      "outside_rz_carries",
+      "rz_carries",
+      "inside_ten_carries",
+      "inside_five_carries",
+      "neutral_carries",
+      "garbadge_time_carries",
 
-rbs <- cleaned_wkly %>% filter(position == "RB") %>% 
-  left_join(rb_totals, by = c("season", "week", "recent_team", "position")) %>% 
-  summarise(rb_target_share = targets/rb_targets,
-         rb_carry_share = carries/rb_carries,
-         rb_touch_share = touches/rb_touches)
+      # combo
+      "touches",
+      "touches_per_game",
+      "receptions",
+      "targets",
+      "outside_rz_targets",
+      "rz_targets",
+      "ez_targets",
+      "deep_targets",
+      "short_targets",
+      "total_yards",
+      "total_tds",
+      
+      # snaps
+      "offense_snaps",
+      "offense_snap_rate",
+      
+      # fantasy
+      "rec_pts",
+      "rush_pts",
+      "nw_pts",
+      "nw_pts_per_game",
+      "nw_pts_per_snap",
+      
+      # ids
+      "player_id"
+    )
+  ))
 
-rb_avg <- rbs %>% group_by(player_id, season) %>% 
-  summarise(
-    full_name = last(.data$full_name),
-    games = dplyr::n(),
-    recent_team = dplyr::last(.data$recent_team),
-    position = dplyr::last(.data$position),
-    avg_target_share = mean(rb_target_share))
+# Receivers ----
+receivers <-
+  season %>%
+  filter(position == "WR" | position == "TE") %>% 
+  dplyr::select(tidyselect::any_of(
+    c(
+      # basic info
+      "nw_rk",
+      "season",
+      "full_name",
+      "recent_team",
+      "position",
+      "games",
+      
+       # receiving stats
+      "receptions",
+      "targets",
+      "receiving_yards",
+      "receiving_tds",
+      "receiving_air_yards",
+      "receiving_yards_after_catch",
+      "receiving_first_downs",
+      "outside_rz_targets",
+      "rz_targets",
+      "ez_targets",
+      "ez_targets_inside_rz",
+      "ez_targets_outside_rz",
+      "deep_targets",
+      "short_targets",
+      "neutral_targets",
+      "garbadge_time_targets",
+      "adot",
+      "catch_rate",
+      "rz_catch_rate",
+      "ez_catch_rate",
+      "deep_catch_rate",
+      "short_catch_rate",
+      "rec_yds_100",
+      "rec_yds_150",
+      "rec_yds_200",
+      "rec_td_1",
+      "rec_td_20",
+      "rec_td_50",
+      
+      # combo
+      "touches",
+      "total_yards",
+      "total_tds",
+      
+      # snaps
+      "offense_snaps",
+      "offense_snap_rate",
+      
+      # fantasy
+      "rec_pts",
+      "rush_pts",
+      "nw_pts",
+      
+      # ids
+      "player_id"
+    )
+  ))
+
+# Quarterbacks ----
+qbs <-
+  season %>%
+  filter(position == "QB") %>% 
+  dplyr::select(tidyselect::any_of(
+    c(
+      # basic info
+      "nw_rk",
+      "season",
+      "full_name",
+      "recent_team",
+      "position",
+      "games",
+      
+      # passing
+      "completions",
+      "attempts",
+      "passing_yards",
+      "passing_tds",
+      "interceptions",
+      "sacks",
+      "passing_air_yards",
+      "passing_yards_after_catch",
+      "passing_first_downs",
+      "rz_attempts",
+      "ez_attempts",
+      "ez_attempts_inside_rz",
+      "ez_attempts_outside_rz",
+      "deep_attempts",
+      "short_attempts",
+      "neutral_attempts",
+      "garbadge_time_attempts",
+      "rz_completion_pct",
+      "ez_completion_pct",
+      "deep_completion_pct",
+      "short_completion_pct",
+      "pass_yds_300",
+      "pass_yds_350",
+      "pass_yds_400",
+      "pass_td_1",
+      "pass_td_20",
+      "pass_td_50",
+      "int_tds",
+      
+      # rushing
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "rushing_first_downs",
+      "rz_carries",
+
+      # snaps
+      "offense_snaps",
+      "offense_snap_rate",
+      
+      # fantasy
+      "pass_pts",
+      "rush_pts",
+      "nw_pts",
+      
+      # ids
+      "player_id"
+    )
+  ))
 ```
 
-Weighted opportunites
-```{r}
-rb_sums <- team_sums %>% filter(position == "RB")
-
-qualified_rbs <- season %>% filter(position == "RB", touches_per_game > 8)
-
-rbs <- 
-  qualified_rbs[,"season", "player_name", "recent_team", rush_cols, combo_cols, snaps_cols, fantasy_cols]
-
-qualified_rbs <- qual
-
-player_ids <-
-  joined_wkly[, c("player_id", "season", "week", "recent_team", id_cols)]
-
-
-rb_tbl <- 
-  qualified_rbs[, c("season", "player_name", "recent_team", add_rush_cols)]
-
-```
-
-Create dataframe columns
-```{r}
-players <- distinct(joined_wkly[, c(1:5)])
-
-id_cols <-
-  c(
-    "espn_id",
-    "sportradar_id",
-    "yahoo_id",
-    "rotowire_id",
-    "pff_id",
-    "fantasy_data_id",
-    "sleeper_id"
+```{r Weighted opportunites}
+# Weighted touches ----
+rb_pts_per_touch <-
+  rbs %>% filter(touches_per_game > 8) %>% group_by(season) %>% mutate(
+    rz_carries = rz_carries - inside_ten_carries,
+    inside_ten_carries = inside_ten_carries - inside_five_carries,
+    outside_rz_targets = outside_rz_targets - deep_targets
+  ) %>%
+  summarise(
+    rbs = n(),
+    total_rush_pts = sum(rush_pts),
+    total_carries = sum(carries),
+    total_outside_rz_carries = sum(outside_rz_carries),
+    total_rz_carries = sum(rz_carries),
+    total_inside_ten_carries = sum(inside_ten_carries),
+    total_inside_five_carries = sum(inside_five_carries),
+    total_neutral_carries = sum(neutral_carries),
+    total_garbadge_time_carries = sum(garbadge_time_carries),
+    total_rec_pts = sum(rec_pts),
+    total_targets = sum(targets),
+    total_outside_rz_targets = sum(outside_rz_targets),
+    total_rz_targets = sum(rz_targets),
+    total_ez_targets = sum(ez_targets),
+    total_deep_targets = sum(deep_targets),
+    total_short_targets = sum(short_targets),
+    per_carry = total_rush_pts / total_carries,
+    per_outside_rz_carry = total_rush_pts / total_outside_rz_carries,
+    per_rz_carry = total_rush_pts / total_rz_carries,
+    per_inside_ten_carry = total_rush_pts / total_inside_ten_carries,
+    per_inside_five_carry = total_rush_pts / total_inside_five_carries,
+    per_neutral_carry = total_rush_pts / total_neutral_carries,
+    per_garbadge_time_carry = total_rush_pts / total_garbadge_time_carries,
+    per_target = total_rec_pts / total_targets,
+    per_outside_rz_target = total_rec_pts / total_outside_rz_targets,
+    per_rz_target = total_rec_pts / total_rz_targets,
+    per_ez_target = total_rec_pts / total_ez_targets,
+    per_deep_target = total_rec_pts / total_deep_targets,
+    per_short_target = total_rec_pts / total_short_targets
+  ) %>%
+  ungroup() %>%
+  summarise(
+    avg_per_carry = mean(per_carry, trim = 0.05),
+    avg_per_outside_rz_carry = mean(per_outside_rz_carry, trim = 0.05),
+    avg_per_rz_carry = mean(per_rz_carry, trim = 0.05),
+    avg_per_inside_ten_carry = mean(per_inside_ten_carry, trim = 0.05),
+    avg_per_inside_five_carry = mean(per_inside_five_carry, trim = 0.05),
+    avg_per_neutral_carry = mean(per_neutral_carry, trim = 0.05),
+    avg_per_garbadge_time_carry = mean(per_garbadge_time_carry, trim = 0.05),
+    avg_per_target = mean(per_target, trim = 0.05),
+    avg_per_outside_rz_target = mean(per_outside_rz_target, trim = 0.05),
+    avg_per_rz_target = mean(per_rz_target, trim = 0.05),
+    avg_per_ez_target = mean(per_ez_target, trim = 0.05),
+    avg_per_deep_target = mean(per_deep_target, trim = 0.05),
+    avg_per_short_target = mean(per_short_target, trim = 0.05)
   )
 
-pass_cols <- c(
-  "completions",
-  "attempts",
-  "passing_yards",
-  "passing_tds",
-  "interceptions",
-  "sacks",
-  "passing_air_yards",
-  "passing_yards_after_catch",
-  "passing_first_downs",
-  "passing_epa",
-  "dakota",
-  "rz_attempts",
-  "ez_attempts",
-  "ez_attempts_inside_rz",
-  "ez_attempts_outside_rz",
-  "deep_attempts",
-  "rz_completion_pct",
-  "ez_completion_pct",
-  "deep_completion_pct",
-  "pass_td_1",
-  "pass_td_20",
-  "pass_td_50",
-  "int_tds",
-  "pass_yds_300",
-  "pass_yds_350",
-  "pass_yds_400"
+rbs <- rbs %>% group_by(player_id, season) %>%
+  mutate(
+    rz_carries = rz_carries - inside_ten_carries,
+    inside_ten_carries = inside_ten_carries - inside_five_carries,
+    outside_rz_targets = outside_rz_targets - deep_targets,
+    opps = sum(
+      outside_rz_carries * rb_pts_per_touch$avg_per_outside_rz_carry,
+      rz_carries * rb_pts_per_touch$avg_per_rz_carry,
+      inside_ten_carries * rb_pts_per_touch$avg_per_inside_ten_carry,
+      inside_five_carries * rb_pts_per_touch$avg_per_inside_five_carry,
+      outside_rz_targets * rb_pts_per_touch$avg_per_outside_rz_target,
+      rz_targets * rb_pts_per_touch$avg_per_rz_target,
+      deep_targets * rb_pts_per_touch$avg_per_deep_target
+    )
+  ) %>% 
+  ungroup() %>% 
+  arrange(-opps) %>% 
+  dplyr::group_by(season) %>%
+  dplyr::mutate(opps_rk = 1:n(),
+                efficiency = opps_rk - nw_rk) %>%
+  ungroup() %>% 
+  arrange(-season, nw_rk) %>% 
+  relocate(player_id, .after = efficiency)
+
+# Weighted targets ----
+rec_pts_per_target <-
+  receivers %>% filter(receptions / games >= 1.875) %>% group_by(season) %>% 
+  summarise(
+    qual_receivers = n(),
+    total_rec_pts = sum(rec_pts),
+    total_targets = sum(targets),
+    total_outside_rz_targets = sum(outside_rz_targets),
+    total_rz_targets = sum(rz_targets),
+    total_ez_targets = sum(ez_targets),
+    total_ez_targets_inside_rz = sum(ez_targets_inside_rz),
+    total_ez_targets_outside_rz = sum(ez_targets_outside_rz),
+    total_deep_targets = sum(deep_targets),
+    total_short_targets = sum(short_targets),
+    total_neutral_targets = sum(neutral_targets),
+    total_garbadge_time_targets = sum(garbadge_time_targets),
+    per_target = total_rec_pts / total_targets,
+    per_outside_rz_target = total_rec_pts / total_outside_rz_targets,
+    per_rz_target = total_rec_pts / total_rz_targets,
+    per_ez_target = total_rec_pts / total_ez_targets,
+    per_ez_target_inside_rz = total_rec_pts / total_ez_targets_inside_rz,
+    per_ez_target_outside_rz = total_rec_pts / total_ez_targets_outside_rz,
+    per_deep_target = total_rec_pts / total_deep_targets,
+    per_short_target = total_rec_pts / total_short_targets,
+    per_neutral_target = total_rec_pts / total_neutral_targets,
+    per_garbadge_time_target = total_rec_pts / total_garbadge_time_targets
+  ) %>%
+  ungroup() %>%
+  summarise(
+    avg_per_target = mean(per_target, trim = 0.2),
+    avg_per_outside_rz_target = mean(per_outside_rz_target, trim = 0.2),
+    avg_per_rz_target = mean(per_rz_target, trim = 0.2),
+    avg_per_ez_target = mean(per_ez_target, trim = 0.2),
+    avg_per_ez_target_inside_rz = mean(per_ez_target_inside_rz, trim = 0.2),
+    avg_per_ez_target_outside_rz = mean(per_ez_target_outside_rz, trim = 0.2),
+    avg_per_deep_target = mean(per_deep_target, trim = 0.2),
+    avg_per_short_target = mean(per_short_target, trim = 0.2),
+    avg_per_neutral_target = mean(per_neutral_target, trim = 0.2),
+    avg_per_garbadge_time_target = mean(per_garbadge_time_target, trim = 0.2)
   )
 
-rush_cols <- c(
-  "carries",
-  "rushing_yards",
-  "rushing_tds",
-  "rushing_first_downs",
-  "rushing_epa",
-  "outside_rz_carries",
-  "rz_carries",
-  "inside_ten_carries",
-  "inside_five_carries",
-  "neutral_carries",
-  "rush_td_1",
-  "rush_td_10",
-  "rush_td_30",
-  "rush_td_50",
-  "rush_yds_100",
-  "rush_yds_150",
-  "rush_yds_200"
-)
+receivers <- receivers %>% group_by(player_id, season) %>%
+  mutate(
+    opps = sum(
+      targets * rec_pts_per_target$avg_per_target,
+      outside_rz_targets * rec_pts_per_target$avg_per_outside_rz_target,
+      rz_targets * rec_pts_per_target$avg_per_rz_target,
+      ez_targets_inside_rz * rec_pts_per_target$avg_per_ez_target_inside_rz,
+      ez_targets_outside_rz * rec_pts_per_target$avg_per_ez_target_outside_rz,
+      deep_targets * rec_pts_per_target$avg_per_deep_target,
+      short_targets * rec_pts_per_target$avg_per_short_target
+    )
+  ) %>% 
+  ungroup() %>% 
+  arrange(-opps) %>% 
+  dplyr::group_by(season) %>%
+  dplyr::mutate(opps_rk = 1:n(),
+                efficiency = opps_rk - nw_rk) %>%
+  ungroup() %>% 
+  arrange(-season, nw_rk) %>% 
+  relocate(player_id, .after = efficiency)
 
-rec_cols <- c(
-  "receptions",
-  "targets",
-  "receiving_yards",
-  "receiving_tds",
-  "receiving_air_yards",
-  "receiving_yards_after_catch",
-  "receiving_first_downs",
-  "receiving_epa",
-  "rz_targets",
-  "ez_targets",
-  "ez_targets_inside_rz",
-  "ez_targets_outside_rz",
-  "deep_targets",
-  "adot",
-  "catch_rate",
-  "rz_catch_rate",
-  "ez_catch_rate",
-  "deep_catch_rate",
-  "rec_yds_100",
-  "rec_yds_150",
-  "rec_yds_200",
-  "rec_td_1",
-  "rec_td_20",
-  "rec_td_50"
-)
+# Weighted attempts ----
+qbs_pts_per_attempt <-
+  qbs %>% filter(attempts / games > 14) %>% group_by(season) %>% 
+  summarise(
+    qual_qbs = n(),
+    total_pass_pts = sum(pass_pts),
+    total_attempts = sum(attempts),
+    total_outside_rz_attempts= sum(outside_rz_attempts),
+    total_rz_attempts = sum(rz_attempts),
+    total_ez_attempts = sum(ez_attempts),
+    total_ez_attempts_inside_rz = sum(ez_attempts_inside_rz),
+    total_ez_attempts_outside_rz = sum(ez_attempts_outside_rz),
+    total_deep_attempts = sum(deep_attempts),
+    total_short_attempts = sum(short_attempts),
+    total_neutral_attempts = sum(neutral_attempts),
+    total_garbadge_time_attempts = sum(garbadge_time_attempts),
+    total_rush_pts = sum(rush_pts),
+    total_carries = sum(carries),
+    total_rz_carries = sum(rz_carries),
+    per_attempt = total_pass_pts / total_attempts,
+    per_outside_rz_attempt = total_pass_pts / total_outside_rz_attempts,
+    per_rz_attempt = total_pass_pts / total_rz_attempts,
+    per_ez_attempt = total_pass_pts / total_ez_attempts,
+    per_ez_attempt_inside_rz = total_pass_pts / total_ez_attempts_inside_rz,
+    per_ez_attempt_outside_rz = total_pass_pts / total_ez_attempts_outside_rz,
+    per_deep_attempt = total_pass_pts / total_deep_attempts,
+    per_short_attempt = total_pass_pts / total_short_attempts,
+    per_neutral_attempt = total_pass_pts / total_neutral_attempts,
+    per_garbadge_time_attempt = total_pass_pts / total_garbadge_time_attempts,
+    per_carry = total_rush_pts / total_carries,
+    per_rz_carry = total_rush_pts / total_rz_carries
+  ) %>%
+  ungroup() %>%
+  summarise(
+    avg_per_attempt = mean(per_attempt, trim = 0.2),
+    avg_per_outside_rz_attempt = mean(per_outside_rz_attempt, trim = 0.2),
+    avg_per_rz_attempt = mean(per_rz_attempt, trim = 0.2),
+    avg_per_ez_attempt = mean(per_ez_attempt, trim = 0.2),
+    avg_per_ez_attempt_inside_rz = mean(per_ez_attempt_inside_rz, trim = 0.2),
+    avg_per_ez_attempt_outside_rz = mean(per_ez_attempt_outside_rz, trim = 0.2),
+    avg_per_deep_attempt = mean(per_deep_attempt, trim = 0.2),
+    avg_per_short_attempt = mean(per_short_attempt, trim = 0.2),
+    avg_per_neutral_attempt = mean(per_neutral_attempt, trim = 0.2),
+    avg_per_garbadge_time_attempt = mean(per_garbadge_time_attempt, trim = 0.2),
+    avg_per_carry = mean(per_carry, trim = 0.2),
+    avg_per_rz_carry = mean(per_rz_carry, trim = 0.2)
+  )
 
-st_cols <- c("st_td_1",
-             "st_td_10",
-             "st_td_30",
-             "st_td_50")
-
-fantasy_cols <- c("nw_pts", "rush_pts", "rec_pts", "pass_pts", "fantasy_points", "fantasy_points_ppr")
-
-combo_cols <- c("touches", "total_yards", "total_tds", "combo_yds_100", "combo_yds_150")
-
-game_cols <- c("game_id", "opp", "team_score", "opp_score", "location", "spread_line", "team_coach", "away_coach")
-
-adp_cols <- c("pick", "overall")
-snaps_cols <- c("total_snaps", "offense_snaps",  "offense_snap_rate")
-injury_cols <- c("active_inactive", "game_designation", "injury_type", "started")
+qbs <- qbs %>% group_by(player_id, season) %>%
+  mutate(
+    opps = sum(
+      outside_rz_attempts * qbs_pts_per_attempt$avg_per_outside_rz_attempt,
+      rz_attempts * qbs_pts_per_attempt$avg_per_rz_attempt,
+      ez_attempts_inside_rz * qbs_pts_per_attempt$avg_per_ez_attempt_inside_rz,
+      ez_attempts_outside_rz * qbs_pts_per_attempt$avg_per_ez_attempt_outside_rz,
+      deep_attempts * qbs_pts_per_attempt$avg_per_deep_attempt,
+      short_attempts * qbs_pts_per_attempt$avg_per_short_attempt,
+      neutral_attempts * qbs_pts_per_attempt$avg_per_neutral_attempt,
+      carries * qbs_pts_per_attempt$avg_per_carry,
+      rz_carries * qbs_pts_per_attempt$avg_per_rz_carry
+    )
+  ) %>% 
+  ungroup() %>% 
+  arrange(-opps) %>% 
+  dplyr::group_by(season) %>%
+  dplyr::mutate(opps_rk = 1:n(),
+                efficiency = opps_rk - nw_rk) %>%
+  ungroup() %>% 
+  arrange(-season, nw_rk) %>% 
+  relocate(player_id, .after = efficiency)
 ```
+
+```{r Opportunity shares}
+# Raw opportunities ----
+raw_opportunites <-
+  wkly %>%
+  select(
+    1:5,
+    "nw_position",
+    "touches",
+    "attempts",
+    "neutral_attempts",
+    "carries",
+    "rz_carries",
+    "inside_ten_carries",
+    "neutral_carries",
+    "targets",
+    "rz_targets",
+    "ez_targets",
+    "neutral_targets"
+  ) %>% group_by(recent_team, week, season, nw_position) %>%
+  mutate(
+    tm_touches = sum(touches),
+    tm_attempts = sum(attempts),
+    tm_neutral_attempts = sum(neutral_attempts),
+    tm_carries = sum(carries),
+    tm_rz_carries = sum(rz_carries, rz_targets),
+    tm_inside_ten_carries = sum(inside_ten_carries),
+    tm_neutral_carries = sum(neutral_carries)
+  ) %>%
+  group_by(recent_team, week, season) %>% 
+  mutate(tm_targets = sum(targets),
+    tm_rz_targets = sum(rz_targets),
+    tm_ez_targets = sum(ez_targets),
+    tm_neutral_targets = sum(neutral_targets)) %>% 
+  arrange(recent_team, -season, week, position) %>% 
+  ungroup()
+
+# Cleaned opportunities ----
+opportunites <- raw_opportunites %>%
+  group_by(player_id, season) %>%
+  summarise(
+    full_name = last(full_name),
+    recent_team = last(recent_team),
+    position = last(position),
+    games = n(),
+    nw_position = last(nw_position),
+    touches = sum(touches),
+    tm_touches = sum(tm_touches),
+    attempts = sum(attempts),
+    tm_attempts = sum(tm_attempts),
+    neutral_attempts = sum(neutral_attempts),
+    tm_neutral_attempts = sum(tm_neutral_attempts),
+    carries = sum(carries),
+    tm_carries = sum(tm_carries),
+    rz_carries = sum(rz_carries),
+    tm_rz_carries = sum(tm_rz_carries),
+    inside_ten_carries = sum(inside_ten_carries),
+    tm_inside_ten_carries = sum(tm_inside_ten_carries),
+    neutral_carries = sum(neutral_carries),
+    tm_neutral_carries = sum(tm_neutral_carries),
+    targets = sum(targets),
+    tm_targets = sum(tm_targets),
+    rz_targets = sum(rz_targets),
+    tm_rz_targets = sum(tm_rz_targets),
+    ez_targets = sum(ez_targets),
+    tm_ez_targets = sum(tm_ez_targets),
+    neutral_targets = sum(neutral_targets),
+    tm_neutral_targets = sum(tm_neutral_targets),
+    touch_share = sum(touches / tm_touches, na.rm = TRUE),
+    attempt_share = sum(attempts / tm_attempts, na.rm = TRUE),
+    neutral_attempt_share = sum(neutral_attempts / tm_neutral_attempts, na.rm = TRUE),
+    carry_share = sum(carries / tm_carries, na.rm = TRUE),
+    rz_carry_share = sum(rz_carries / tm_rz_carries, na.rm = TRUE),
+    inside_ten_carry_share = sum(inside_ten_carries / tm_inside_ten_carries, na.rm = TRUE),
+    neutral_carry_share = sum(neutral_carries / tm_neutral_carries, na.rm = TRUE),
+    target_share = sum(targets / tm_targets, na.rm = TRUE),
+    rz_target_share = sum(rz_targets / tm_rz_targets, na.rm = TRUE),
+    ez_target_share = sum(ez_targets / tm_ez_targets, na.rm = TRUE),
+    neutral_target_share = sum(neutral_targets / tm_neutral_targets, na.rm = TRUE)
+  ) %>%
+  mutate(across(where(is.numeric), round, 2)) %>%
+  arrange(-season, recent_team, position)
+
+# Shares ----
+shares <- opportunites %>% select(1:6, 30:40, "nw_position")
+```
+
+How do metrics vary on a week-to-week basis?
+```{r Coefficients of variation}
+# NW pts ----
+nw_pts_var <- wkly %>%
+  select(player_id, season, week, nw_pts) %>%
+  arrange(-season, week) %>%
+  group_by(player_id, season) %>%
+  summarise(across(.cols = "nw_pts", list(mean = mean, sd = sd))) %>%
+  mutate(nw_pts_cv = ifelse(nw_pts_mean != 0, nw_pts_sd / nw_pts_mean, NA))
+
+# Targets ----
+target_breakdown <-
+  wkly %>% ungroup() %>% group_by(player_id, season) %>% mutate(games = n()) %>% group_by(player_id, season, week) %>% 
+  arrange(week) %>% 
+  filter(season == 2020, position == "WR") %>% select(full_name, recent_team, position, games, targets) %>% pivot_wider(
+    id_cols = c("full_name", "recent_team", "position", "games"),
+    names_from = week,
+    names_prefix = "W",
+    values_from = targets
+  ) %>% mutate(total = apply(.[(5:21)], 1, sum, na.rm = TRUE),
+               first = apply(.[(5:13)], 1, sum, na.rm = TRUE)/total,
+               second = apply(.[(13:21)], 1, sum, na.rm = TRUE)/total,
+               std = apply(.[(5:21)], 1, sd, na.rm = TRUE),
+               avg = apply(.[(5:21)], 1, mean, na.rm = TRUE),
+               cv = std/avg) %>% 
+  relocate(games, total, avg, cv, .after = position) %>% 
+  mutate(across(where(is.numeric), round, 2)) %>% 
+  filter(avg >= 5) %>% 
+  arrange(recent_team, -total)
+
+# Carries ----
+carry_breakdown <-
+  wkly %>% ungroup() %>% group_by(player_id, season) %>% mutate(games = n()) %>% group_by(player_id, season, week) %>% 
+  arrange(week) %>% 
+  filter(season == 2020, position == "RB") %>% select(full_name, recent_team, position, games, touches) %>% pivot_wider(
+    id_cols = c("full_name", "recent_team", "position", "games"),
+    names_from = week,
+    names_prefix = "W",
+    values_from = touches
+  ) %>% mutate(total = apply(.[(5:21)], 1, sum, na.rm = TRUE),
+               first = apply(.[(5:13)], 1, sum, na.rm = TRUE)/total,
+               second = apply(.[(13:21)], 1, sum, na.rm = TRUE)/total,
+               std = apply(.[(5:21)], 1, sd, na.rm = TRUE),
+               avg = apply(.[(5:21)], 1, mean, na.rm = TRUE),
+               cv = std/avg) %>% 
+  relocate(games, total, avg, cv, .after = position) %>% 
+  mutate(across(where(is.numeric), round, 2)) %>% 
+  filter(avg >= 8) %>% 
+  arrange(recent_team, -total)
+```
+
+Interactive tables
+```{r}
+library(reactable)
+
+reactable(receivers)
+
+
+```
+
+Export season and weekly stats to csv files
+```{r}
+write_csv(wkly, "weekly_stats.csv")
+write_csv(season, "season_stats.csv")
+```
+
 
