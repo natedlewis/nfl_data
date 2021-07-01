@@ -835,7 +835,7 @@ calculate_full_stats <- function(pbp, weekly = FALSE) {
   player_df <- player_df %>%
     dplyr::mutate(
       touches = receptions + carries,
-      opportunites = targets + carries,
+      opportunities = targets + carries,
       total_yards = passing_yards + rushing_yards + receiving_yards,
       total_tds = passing_tds + rushing_tds + receiving_tds,
       combo_yards_100 = ifelse(rushing_yards >= 50 &
