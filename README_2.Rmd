@@ -1,17 +1,12 @@
 ---
-title: "README.Rmd"
+title: "README_2.Rmd"
 author: "Nate Lewis"
 date: "2021-06-09"
 output:
   md_document:
     variant: markdown_github
 toc: TRUE
----
-
-# NFL Stats
-
-Notes:
-
+notes:
 - merge game data with injury data for singular object
 - create number of games started, and games where snaps meets qualifying snap rate
   # how do players with more snap rates during the back half of a season perform the following season? (ex. David Montgomery)
@@ -26,17 +21,16 @@ Notes:
 - how important are 100+ yard games?
   # any preds?
 - find 90+ yd games
-- how does a good defesnse affect nw scoring by postiion?
+- how does a good defense affect nw scoring by postiion?
   # I would guess more so in NW because big games are much less likely and floors are hit more often
 - make interactive markdown with Shiny framework
+---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
-```{r load data, include=FALSE}
-
+```{r load data}
 # change global notation
 options(scipen = 9999,
         dplyr.summarise.inform = FALSE)
