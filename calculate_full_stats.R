@@ -1,3 +1,8 @@
+# Calcultae player stats with additional variables
+# pbp <- load_pbp(2010:2020) %>% filter(season_type == "REG")
+
+options(dplyr.summarise.inform = FALSE)
+
 custom_mode <- function(x, na.rm = TRUE) {
   if (na.rm) {
     x <- x[!is.na(x)]
@@ -114,7 +119,7 @@ add_dakota <- function(add_to_this, pbp, weekly) {
   }
   return(out)
 }
-calculate_player_stats_test <- function(pbp, weekly = FALSE) {
+calculate_full_stats <- function(pbp, weekly = FALSE) {
   
   
   # Prepare data ------------------------------------------------------------
@@ -617,6 +622,7 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
                   "receiving_yards", "receiving_air_yards", "receiving_yards_after_catch",
                   "receptions", "targets", "receiving_tds", "receiving_fumbles",
                   "receiving_fumbles_lost", "receiving_first_downs", "receiving_epa",
+                  "outside_rz_targets",
                   "rz_targets",
                   "ez_targets",
                   "ez_targets_inside_rz",
@@ -664,7 +670,7 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
   rec_df[rec_df_nas] <- 0
   
   
-  # Special Teams -----------------------------------------------------------
+  # Special teams -----------------------------------------------------------
   
   st_tds <- pbp %>%
     dplyr::filter(.data$special == 1 & !is.na(.data$td_player_id)) %>%
@@ -709,113 +715,113 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
       )
     ) %>%
     dplyr::select(any_of(c(
-          # id information
-          "player_id",
-          "player_name",
-          "recent_team",
-          "season",
-          "week",
-          "season_type",
-          
-          # passing stats
-          "completions",
-          "attempts",
-          "passing_yards",
-          "passing_tds",
-          "interceptions",
-          "sacks",
-          "sack_yards",
-          "sack_fumbles",
-          "sack_fumbles_lost",
-          "passing_air_yards",
-          "passing_yards_after_catch",
-          "passing_first_downs",
-          "passing_epa",
-          "passing_2pt_conversions",
-          "dakota",
-          "outside_rz_attempts",
-          "rz_attempts",
-          "ez_attempts",
-          "ez_attempts_inside_rz",
-          "ez_attempts_outside_rz",
-          "deep_attempts",
-          "short_attempts",
-          "neutral_attempts",
-          "garbadge_time_attempts",
-          "rz_completion_pct",
-          "ez_completion_pct",
-          "deep_completion_pct",
-          "short_completion_pct",
-          "passing_yards_300",
-          "passing_yards_350",
-          "passing_yards_400",
-          "passing_tds_1",
-          "passing_tds_20",
-          "passing_tds_50",
-          "int_tds",
-          
-          # rushing stats
-          "carries",
-          "rushing_yards",
-          "rushing_tds",
-          "rushing_fumbles",
-          "rushing_fumbles_lost",
-          "rushing_first_downs",
-          "rushing_epa",
-          "rushing_2pt_conversions",
-          "outside_rz_carries",
-          "rz_carries",
-          "inside_ten_carries",
-          "inside_five_carries",
-          "neutral_carries",
-          "garbadge_time_carries",
-          "rushing_yards_100",
-          "rushing_yards_150",
-          "rushing_yards_200",
-          "rushing_tds_1",
-          "rushing_tds_10",
-          "rushing_tds_30",
-          "rushing_tds_50",
-          
-          # receiving stats
-          "receptions",
-          "targets",
-          "receiving_yards",
-          "receiving_tds",
-          "receiving_fumbles",
-          "receiving_fumbles_lost",
-          "receiving_air_yards",
-          "receiving_yards_after_catch",
-          "receiving_first_downs",
-          "receiving_epa",
-          "receiving_2pt_conversions",
-          "rz_targets",
-          "ez_targets",
-          "ez_targets_inside_rz",
-          "ez_targets_outside_rz",
-          "deep_targets",
-          "short_targets",
-          "neutral_targets",
-          "garbadge_time_targets",
-          "catch_rate",
-          "adot",
-          "rz_catch_rate",
-          "ez_catch_rate",
-          "deep_catch_rate",
-          "short_catch_rate",
-          "receiving_yards_100",
-          "receiving_yards_150",
-          "receiving_yards_200",
-          "receiving_tds_1",
-          "receiving_tds_20",
-          "receiving_tds_50",
-          
-          # special teams
-          "special_teams_tds",
-          "special_teams_tds_1",
-          "special_teams_tds_10",
-          "special_teams_tds_30",
-          "special_teams_tds_50"
+      # id information
+      "player_id",
+      "player_name",
+      "recent_team",
+      "season",
+      "week",
+
+      # passing stats
+      "completions",
+      "attempts",
+      "passing_yards",
+      "passing_tds",
+      "interceptions",
+      "sacks",
+      "sack_yards",
+      "sack_fumbles",
+      "sack_fumbles_lost",
+      "passing_air_yards",
+      "passing_yards_after_catch",
+      "passing_first_downs",
+      "passing_epa",
+      "passing_2pt_conversions",
+      "dakota",
+      "outside_rz_attempts",
+      "rz_attempts",
+      "ez_attempts",
+      "ez_attempts_inside_rz",
+      "ez_attempts_outside_rz",
+      "deep_attempts",
+      "short_attempts",
+      "neutral_attempts",
+      "garbadge_time_attempts",
+      "rz_completion_pct",
+      "ez_completion_pct",
+      "deep_completion_pct",
+      "short_completion_pct",
+      "passing_yards_300",
+      "passing_yards_350",
+      "passing_yards_400",
+      "passing_tds_1",
+      "passing_tds_20",
+      "passing_tds_50",
+      "int_tds",
+      
+      # rushing stats
+      "carries",
+      "rushing_yards",
+      "rushing_tds",
+      "rushing_fumbles",
+      "rushing_fumbles_lost",
+      "rushing_first_downs",
+      "rushing_epa",
+      "rushing_2pt_conversions",
+      "outside_rz_carries",
+      "rz_carries",
+      "inside_ten_carries",
+      "inside_five_carries",
+      "neutral_carries",
+      "garbadge_time_carries",
+      "rushing_yards_100",
+      "rushing_yards_150",
+      "rushing_yards_200",
+      "rushing_tds_1",
+      "rushing_tds_10",
+      "rushing_tds_30",
+      "rushing_tds_50",
+      
+      # receiving stats
+      "receptions",
+      "targets",
+      "receiving_yards",
+      "receiving_tds",
+      "receiving_fumbles",
+      "receiving_fumbles_lost",
+      "receiving_air_yards",
+      "receiving_yards_after_catch",
+      "receiving_first_downs",
+      "receiving_epa",
+      "receiving_2pt_conversions",
+      "outside_rz_targets",
+      "rz_targets",
+      "ez_targets",
+      "ez_targets_inside_rz",
+      "ez_targets_outside_rz",
+      "deep_targets",
+      "short_targets",
+      "neutral_targets",
+      "garbadge_time_targets",
+      "catch_rate",
+      "adot",
+      "rz_catch_rate",
+      "ez_catch_rate",
+      "deep_catch_rate",
+      "short_catch_rate",
+      "receiving_yards_100",
+      "receiving_yards_150",
+      "receiving_yards_200",
+      "receiving_tds_1",
+      "receiving_tds_20",
+      "receiving_tds_50",
+      
+      # special teams
+      "special_teams_tds",
+      "special_teams_tds_1",
+      "special_teams_tds_10",
+      "special_teams_tds_30",
+      "special_teams_tds_50"
       
     ))) %>%
     dplyr::filter(!is.na(.data$player_id))
@@ -828,7 +834,8 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
   
   player_df <- player_df %>%
     dplyr::mutate(
-      touches = targets + carries,
+      touches = receptions + carries,
+      opportunites = targets + carries,
       total_yards = passing_yards + rushing_yards + receiving_yards,
       total_tds = passing_tds + rushing_tds + receiving_tds,
       combo_yards_100 = ifelse(rushing_yards >= 50 &
@@ -882,153 +889,16 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
         25 * special_teams_tds_50,
       nw_pts = pass_pts + rush_pts + rec_pts + st_pts + combo_pts,
       rush_pts = rush_pts + (combo_pts / 2),
-      rec_pts = rec_pts + (combo_pts / 2)
-    )
+      rec_pts = rec_pts + (combo_pts / 2)) %>% 
+    arrange(.data$player_id, .data$season, .data$week)
   
-  player_df <- player_df %>% 
-    left_join(rosters, by = c("player_id" = "gsis_id", "season")) %>%
-    left_join(injuries, by = c("player_id", "season", "week")) %>%
-    left_join(games, by = c("recent_team" = "team", "season", "week")) %>% 
-    filter(season_type == "REG") %>%
-    select(tidyselect::any_of(
-      c(
-        # basic info
-        "season",
-        "week",
-        "full_name",
-        "recent_team",
-        "position",
-        
-        # passing
-        "completions",
-        "attempts",
-        "passing_yards",
-        "passing_tds",
-        "interceptions",
-        "sacks",
-        "passing_air_yards",
-        "passing_yards_after_catch",
-        "passing_first_downs",
-        "passing_epa",
-        "dakota",
-        "outside_rz_attempts",
-        "rz_attempts",
-        "ez_attempts",
-        "ez_attempts_inside_rz",
-        "ez_attempts_outside_rz",
-        "deep_attempts",
-        "short_attempts",
-        "neutral_attempts",
-        "garbadge_time_attempts",
-        "rz_completion_pct",
-        "ez_completion_pct",
-        "deep_completion_pct",
-        "short_completion_pct",
-        "passing_yards_300",
-        "passing_yards_350",
-        "passing_yards_400",
-        "passing_tds_1",
-        "passing_tds_20",
-        "passing_tds_50",
-        "int_tds",
-        
-        # rushing
-        "carries",
-        "rushing_yards",
-        "rushing_tds",
-        "rushing_first_downs",
-        "rushing_epa",
-        "outside_rz_carries",
-        "rz_carries",
-        "inside_ten_carries",
-        "inside_five_carries",
-        "neutral_carries",
-        "garbadge_time_carries",
-        "rushing_yards_100",
-        "rushing_yards_150",
-        "rushing_yards_200",
-        "rushing_tds_1",
-        "rushing_tds_10",
-        "rushing_tds_30",
-        "rushing_tds_50",
-        
-        
-        # receiving stats
-        "receptions",
-        "targets",
-        "receiving_yards",
-        "receiving_tds",
-        "receiving_air_yards",
-        "receiving_yards_after_catch",
-        "receiving_first_downs",
-        "receiving_epa",
-        "rz_targets",
-        "ez_targets",
-        "ez_targets_inside_rz",
-        "ez_targets_outside_rz",
-        "deep_targets",
-        "short_targets",
-        "neutral_targets",
-        "garbadge_time_targets",
-        "adot",
-        "catch_rate",
-        "rz_catch_rate",
-        "ez_catch_rate",
-        "deep_catch_rate",
-        "short_catch_rate",
-        "receiving_yards_100",
-        "receiving_yards_150",
-        "receiving_yards_200",
-        "receiving_tds_1",
-        "receiving_tds_20",
-        "receiving_tds_50",
-        
-        # special teams
-        "special_teams_tds",
-        
-        # combo
-        "touches",
-        "combo_yards_100",
-        "combo_yards_150",
-        "total_yards",
-        "total_tds",
-        
-        # snaps
-        "offense_snaps",
-        "offense_snap_rate",
-        
-        # fantasy
-        "pass_pts",
-        "rec_pts",
-        "rush_pts",
-        "st_pts",
-        "nw_pts",
-        "fantasy_points",
-        "fantasy_points_ppr",
-        
-        # injury stats
-        "game_designation",
-        "started",
-        
-        # secondary info
-        "game_id",
-        "player_id",
-        "player_name",
-        "nw_position",
-        "draft_year",
-        "draft_round",
-        "draft_pick"
-      ))) %>% 
-    dplyr::arrange(.data$player_id, .data$season, .data$week)
-
   # if user doesn't want week-by-week input, aggregate the whole df
   if (isFALSE(weekly)) {
     player_df <- player_df %>%
-      dplyr::group_by(.data$player_id, season) %>%
+      dplyr::group_by(.data$player_id, .data$season) %>%
       dplyr::summarise(
-        full_name = last(.data$full_name),
+        player_name = custom_mode(.data$player_name),
         recent_team = last(.data$recent_team),
-        position = last(.data$position),
         games = n(),
         
         # passing
@@ -1083,7 +953,6 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
         rushing_tds_30 = sum(rushing_tds_30),
         rushing_tds_50 = sum(rushing_tds_50),
         
-        
         # receiving stats
         receptions = sum(receptions),
         targets = sum(targets),
@@ -1093,6 +962,7 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
         receiving_yards_after_catch = sum(receiving_yards_after_catch),
         receiving_first_downs = sum(receiving_first_downs),
         receiving_epa = dplyr::if_else(all(is.na(.data$receiving_epa)), NA_real_, sum(.data$receiving_epa, na.rm = TRUE)),
+        outside_rz_targets = sum(outside_rz_targets),
         rz_targets = sum(rz_targets),
         ez_targets = sum(ez_targets),
         ez_targets_inside_rz = sum(ez_targets_inside_rz),
@@ -1119,14 +989,11 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
         
         # combo
         touches = sum(touches),
+        opportunities = sum(opportunities),
         combo_yards_100 = sum(combo_yards_100),
         combo_yards_150 = sum(combo_yards_150),
         total_yards = sum(total_yards),
         total_tds = sum(total_tds),
-        
-        # snaps
-        offense_snaps = sum(offense_snaps),
-        offense_snap_rate = mean(offense_snap_rate),
         
         # fantasy
         pass_pts = sum(pass_pts),
@@ -1136,31 +1003,12 @@ calculate_player_stats_test <- function(pbp, weekly = FALSE) {
         nw_pts = sum(nw_pts),
         fantasy_points = sum(fantasy_points),
         fantasy_points_ppr = sum(fantasy_points_ppr),
-        
-        # secondary info
-        player_name = custom_mode(.data$player_name),
-        nw_position = last(nw_position),
-        draft_year = last(draft_year),
-        draft_round = last(draft_round),
-        draft_pick = last(draft_pick)
       ) %>%
       dplyr::ungroup() %>%
       add_dakota(pbp = pbp, weekly = weekly) %>%
-      relocate(dakota, .after = passing_epa) %>% 
+      relocate(dakota, .after = passing_epa) %>%
       relocate(player_id, .before = player_name)
   }
   
   return(player_df)
 }
-
-weekly_stats <- pbp %>%
-  dplyr::filter(season_type == "REG") %>%
-  calculate_player_stats_test()
-
-weekly_stats <- calculate_player_stats_test(pbp %>% filter(season_type == "REG"), weekly = TRUE)
-
-season_stats <- calculate_player_stats_test(pbp %>% filter(season_type == "REG"), weekly = FALSE)
-
-
-write_csv(season_stats, "season_stats.csv")
-
