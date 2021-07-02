@@ -7,3 +7,23 @@ cmd + shift + d: duplicate line underneath
 set up your own shortcuts to do useful things like
 switch tabs
 jump up and down between code chunks
+
+Key data manipulation verbs from the dplyr package
+filter(), 
+arrange(), 
+rename(), 
+relocate(), 
+select(),
+mutate(),
+across(),
+where()
+
+
+Table 4.2: Most commonly used data types in R.
+name	description
+vector:	list of values with of the same variable mode
+factor:	for ordinal variables
+matrix:	2D data structure
+array	same as matrix for higher dimensional data
+data frame	similar to matrix but with column names
+list	flexible type that can contain different other variable types
