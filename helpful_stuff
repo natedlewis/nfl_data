@@ -1,29 +1,25 @@
-Helpful keyboard shortcuts
+# Helpful keyboard shortcuts
+
 cmd + enter: run selected code
 cmd + shift + enter: run code chunk
 cmd + i: re-indent selected code
 cmd + shift + c: comment/uncomment several lines of code
 cmd + shift + d: duplicate line underneath
-set up your own shortcuts to do useful things like
-switch tabs
-jump up and down between code chunks
+set up your own shortcuts to do useful things like switch tabs or jump up and down between code chunks
 
-Key data manipulation verbs from the dplyr package
-filter(), 
-arrange(), 
-rename(), 
-relocate(), 
-select(),
-mutate(),
-across(),
-where()
+# Factorization and some renaming
 
-
-Table 4.2: Most commonly used data types in R.
-name	description
-vector:	list of values with of the same variable mode
-factor:	for ordinal variables
-matrix:	2D data structure
-array	same as matrix for higher dimensional data
-data frame	similar to matrix but with column names
-list	flexible type that can contain different other variable types
+df <- raw_df %>%
+    mutate(title = Title,
+           genres = Genres,
+           release_date_chr = `Release Date`,
+           release_country = as.factor(`Release Country`),
+           movie_rating = as.factor(`Movie Rating`),
+           review_rating = `Review Rating`,
+           runtime = `Movie Run Time`,
+           plot = Plot,
+           cast = Cast,
+           language = Language,
+           locations = as.factor(`Filming Locations`),
+           budget = Budget) %>%
+    select(title, genres, release_date_chr, release_country, movie_rating, review_rating, runtime, plot, cast, language, locations, budget)
