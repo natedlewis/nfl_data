@@ -36,14 +36,20 @@ overall_raw <- calculate_full_stats(pbp, weekly = FALSE) %>%
 weekly_raw <- calculate_full_stats(pbp, weekly = TRUE) %>% 
     progressr::with_progress()
 
-# Load secondary data
+# load other
 weekly_data <- read_csv("./data_output/weekly_data.csv")
 season_data <- read_csv("./data_output/season_data.csv")
-rosters <- read_csv("./data/rosters.csv") %>% mutate(side_of_ball = ifelse(nw_position %in% c("QB", "RB", "WR/TE"), "OFF", "DEF"))
-adp_historic <- read_csv("./data/adp_historic.csv") %>%
-  select(season, player_id, sleeper_id, pick, overall:n)
-adp_2021 <- read_csv("./data/adp_2021.csv") %>%
-  select(season, player_id, sleeper_id, pick, overall:n)
+rosters <- read_csv("./data/rosters.csv") %>% 
+  mutate(side_of_ball = ifelse(nw_position %in% c("QB", "RB", "WR/TE"), "OFF", "DEF"))
+
+```
+
+```{r}
+colnames(weekly_data)
+```
+
+```{r}
+colnames(season_data)
 ```
 
 ```{r player stats, echo=FALSE}
@@ -69,11 +75,185 @@ overall_joined <- overall_raw %>%
   mutate(std_rk_ovr = 1:n()) %>%
   ungroup() %>%
   arrange(player_id, season)
+```
 
+```{r}
 # clean joined stats
+primary_cols <- c(
+  "player_id",
+  "season",
+  "week",
+  "full_name",
+  "recent_team",
+  "position"
+)
+
+pass_cols <- c(
+  "completions",
+  "attempts",
+  "passing_yards",
+  "passing_tds",
+  "interceptions",
+  "sacks",
+  "passing_air_yards",
+  "passing_yards_after_catch",
+  "passing_first_downs",
+  "passing_epa",
+  "dakota",
+  "outside_rz_attempts",
+  "rz_attempts",
+  "ez_attempts",
+  "ez_attempts_inside_rz",
+  "ez_attempts_outside_rz",
+  "deep_attempts",
+  "short_attempts",
+  "neutral_attempts",
+  "garbadge_time_attempts",
+  "rz_completion_pct",
+  "ez_completion_pct",
+  "deep_completion_pct",
+  "short_completion_pct",
+  "passing_yards_250",
+  "passing_yards_300",
+  "passing_yards_350",
+  "passing_yards_400",
+  "passing_tds_1",
+  "passing_tds_20",
+  "passing_tds_50",
+  "int_tds"
+)
+
+rush_cols <-
+  c(
+    "carries",
+    "rushing_yards",
+    "rushing_tds",
+    "rushing_first_downs",
+    "rushing_epa",
+    "outside_rz_carries",
+    "rz_carries",
+    "inside_ten_carries",
+    "inside_five_carries",
+    "neutral_carries",
+    "garbadge_time_carries",
+    "rushing_yards_90",
+    "rushing_yards_100",
+    "rushing_yards_150",
+    "rushing_yards_200",
+    "rushing_tds_1",
+    "rushing_tds_10",
+    "rushing_tds_30",
+    "rushing_tds_50"
+  )
+
+rec_cols <- c(
+  "receptions",
+  "targets",
+  "receiving_yards",
+  "receiving_tds",
+  "receiving_air_yards",
+  "receiving_yards_after_catch",
+  "receiving_first_downs",
+  "receiving_epa",
+  "outside_rz_targets",
+  "rz_targets",
+  "ez_targets",
+  "ez_targets_inside_rz",
+  "ez_targets_outside_rz",
+  "deep_targets",
+  "short_targets",
+  "neutral_targets",
+  "garbadge_time_targets",
+  "adot",
+  "catch_rate",
+  "rz_catch_rate",
+  "ez_catch_rate",
+  "deep_catch_rate",
+  "short_catch_rate",
+  "receiving_yards_90",
+  "receiving_yards_100",
+  "receiving_yards_150",
+  "receiving_yards_200",
+  "receiving_tds_1",
+  "receiving_tds_20",
+  "receiving_tds_50"
+)
+
+combo_cols <-
+  c(
+    "special_teams_tds",
+    "touches",
+    "opportunities",
+    "combo_yards_100",
+    "combo_yards_150",
+    "total_yards",
+    "total_tds"
+  )
+
+stats_cols <- c(pass_cols, rush_cols, rec_cols, combo_cols)
+
+fantasy_cols <- c(
+  "pass_pts",
+  "rec_pts",
+  "rush_pts",
+  "st_pts",
+  "nw_rk",
+  "nw_pts",
+  "nw_rk_ovr",
+  "std_rk",
+  "fantasy_points",
+  "std_rk_ovr"
+)
+
+snap_cols <- c(
+  "total_snaps",
+  "offense_snaps",
+  "qual_snaps",
+  "special_teams_snaps",
+  "offense_snap_rate",
+  "qual_snap_rate"
+)
+
+weekly_cols <-
+  c(
+    "game_id",
+    "active_inactive",
+    "game_designation",
+    "started",
+    "location",
+    "opponent",
+    "score",
+    "team_result",
+    "spread_line",
+    "team_coach",
+    "opp_coach"
+  )
+
+secondary_cols <-
+  c(
+    "player_name",
+    "nw_position",
+    "side_of_ball",
+    "draft_year",
+    "draft_round",
+    "draft_pick"
+  )
+
+nw_cols <- c(
+  "nw_pts",
+  "nw_rk",
+  "nw_rk_ovr",
+  
+```
+
+
+```{r tidy weekly}
+# clean joined stats
+weekly <- weekly_joined[c(primary_cols, stats_cols, "nw_pts", "fantasy_points", weekly_cols, "nw_position", "side_of_ball")]
+
 weekly <- weekly_joined %>%
   select(tidyselect::any_of(
-    c(
+    c(primary_cols))) 
       # basic info
       "season",
       "week",
@@ -218,7 +398,9 @@ weekly <- weekly_joined %>%
   )) %>%
   mutate(across(where(is.numeric), round, 2)) %>% 
   arrange(-season, player_id, week)
+```
 
+```{r tidy overall}
 overall <- overall_joined %>%
   select(tidyselect::any_of(
     c(
@@ -393,6 +575,8 @@ overall_qbs <-
     -sacks, -short_attempts,
     -short_completion_pct
   ) %>% arrange(-season, player_id)
+
+knitr::knit_exit()
 ```
 
 Correlations gets weaker when filtering to quality players, need to fix
@@ -968,6 +1152,11 @@ Working with RB data
 library(ggplot2)
 library(ggrepel)
 library(ggExtra)
+
+adp_historic <- read_csv("./data/adp_historic.csv") %>%
+  select(season, player_id, sleeper_id, pick, overall:n)
+adp_2021 <- read_csv("./data/adp_2021.csv") %>%
+  select(season, player_id, sleeper_id, pick, overall:n)
 
 overall_rbs %>% left_join(adp_historic, by = c("season", "player_id")) %>%
   group_by(nw_position, season) %>%
