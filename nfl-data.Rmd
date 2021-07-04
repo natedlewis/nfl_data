@@ -37,9 +37,9 @@ weekly_raw <- calculate_full_stats(pbp, weekly = TRUE) %>%
     progressr::with_progress()
 
 # Load secondary data
-weekly_data <- read_csv("./data/weekly_data.csv") %>% select(-full_name, -recent_team, -position -nw_position)
-season_data <- read_csv("./data/season_data.csv") %>% select(-full_name, -recent_team, -position -nw_position)
-rosters <- read_csv("./data/rosters.csv")
+weekly_data <- read_csv("./data_output/weekly_data.csv")
+season_data <- read_csv("./data_output/season_data.csv")
+rosters <- read_csv("./data/rosters.csv") %>% mutate(side_of_ball = ifelse(nw_position %in% c("QB", "RB", "WR/TE"), "OFF", "DEF"))
 adp_historic <- read_csv("./data/adp_historic.csv") %>%
   select(season, player_id, sleeper_id, pick, overall:n)
 adp_2021 <- read_csv("./data/adp_2021.csv") %>%
@@ -50,17 +50,12 @@ adp_2021 <- read_csv("./data/adp_2021.csv") %>%
 # join secondary data to stats
 weekly_joined <- weekly_raw %>%
   left_join(rosters, by = c("player_id" = "gsis_id", "season")) %>%
-  left_join(weekly_data, by = c("player_id", "season", "week")) %>%
+  left_join(weekly_data, by = c("player_id", "season", "week", "recent_team")) %>%
   arrange(player_id, season, week)
 
 overall_joined <- overall_raw %>%
-  mutate(
-    nw_pts_per = nw_pts / games,
-    std_pts_per = fantasy_points / games
-  ) %>%
   left_join(rosters, by = c("player_id" = "gsis_id", "season")) %>%
-  left_join(season_data, by = c("player_id", "season")) %>%
-  mutate(side_of_ball = ifelse(nw_position %in% c("QB", "RB", "WR/TE"), "OFF", "DEF")) %>%
+  left_join(season_data %>% select(-games), by = c("player_id", "season")) %>%
   arrange(-nw_pts) %>%
   group_by(nw_position, season) %>%
   mutate(nw_rk = 1:n()) %>%
@@ -111,6 +106,7 @@ weekly <- weekly_joined %>%
       "ez_completion_pct",
       "deep_completion_pct",
       "short_completion_pct",
+      "passing_yards_250",
       "passing_yards_300",
       "passing_yards_350",
       "passing_yards_400",
@@ -131,6 +127,7 @@ weekly <- weekly_joined %>%
       "inside_five_carries",
       "neutral_carries",
       "garbadge_time_carries",
+      "rushing_yards_90",
       "rushing_yards_100",
       "rushing_yards_150",
       "rushing_yards_200",
@@ -163,6 +160,7 @@ weekly <- weekly_joined %>%
       "ez_catch_rate",
       "deep_catch_rate",
       "short_catch_rate",
+      "receiving_yards_90",
       "receiving_yards_100",
       "receiving_yards_150",
       "receiving_yards_200",
@@ -188,23 +186,38 @@ weekly <- weekly_joined %>%
       "st_pts",
       "nw_pts",
       "fantasy_points",
-
-      # game data
+      
+      # snap data
+      "total_snaps",
+      "offense_snaps",
+      "qual_snaps",
+      "offense_snap_rate",
+      "active_inactive",
       "game_designation",
       "started",
+      
+      # game data
+      "game_id",
+      "location",
+      "opponent",
+      "score",
+      "team_result",
+      "spread_line",
+      "team_coach",
+      "opp_coach",
 
       # secondary info
-      "game_id",
-      "opp",
       "player_id",
       "player_name",
       "nw_position",
+      "side_of_ball",
       "draft_year",
       "draft_round",
       "draft_pick"
     )
   )) %>%
-  mutate(across(where(is.numeric), round, 2))
+  mutate(across(where(is.numeric), round, 2)) %>% 
+  arrange(-season, player_id, week)
 
 overall <- overall_joined %>%
   select(tidyselect::any_of(
@@ -324,14 +337,19 @@ overall <- overall_joined %>%
       "rec_pts",
       "rush_pts",
       "st_pts",
-      
-      # player info
+
+      # snap data
+      "total_snaps",
+      "offense_snaps",
+      "special_teams_snaps",
+      "offense_snap_rate",
+      "qual_snap_rate",
+
+      # secondary info
       "player_id",
       "player_name",
       "nw_position",
-      "draft_year",
-      "draft_round",
-      "draft_pick"
+      "side_of_ball"
     )
   )) %>%
   mutate(across(where(is.numeric), round, 2))
@@ -374,8 +392,7 @@ overall_qbs <-
     player_id, nw_position,
     -sacks, -short_attempts,
     -short_completion_pct
-  ) %>%
-  arrange(-season, nw_rk)
+  ) %>% arrange(-season, player_id)
 ```
 
 Correlations gets weaker when filtering to quality players, need to fix
@@ -986,4 +1003,64 @@ ggplot(overall2 %>% filter(position == "QB", pick <= 10, season >= 2017), aes(x=
   scale_x_continuous(breaks=seq(0, 16, 1))
 ```
 
+QB 2021 Week 1 matchups
+```{r}
+average_qbs <-
+  weekly %>%
+  filter(position == "QB", n() > 1) %>%
+  group_by(player_id, season) %>% 
+  summarise(across(.cols = c(completions:int_tds, 
+                             carries:rushing_tds, inside_ten_carries,
+                             nw_pts, fantasy_points),
+                   .fns = mean, na.rm = TRUE,
+                   .names = "{.col}_per")) %>% 
+  mutate(across(where(is.numeric), round, 2))
+
+average_rbs <-
+  weekly %>%
+  filter(nw_position == "RB", n() > 1) %>%
+  group_by(player_id, season) %>% 
+  summarise(across(.cols = c(carries:receiving_tds, rz_targets,
+                             touches:combo_yards_150,
+                             total_snaps:
+                             nw_pts, fantasy_points),
+                   .fns = mean, na.rm = TRUE,
+                   .names = "{.col}_per")) %>% 
+  mutate(across(where(is.numeric), round, 2))
+
+overall_qbs3 <-
+  overall %>%
+  filter(position == "QB", n() > 1, season == 2020) %>%
+  select(player_id, 1:5, nw_rk) %>%
+  left_join(overall_qbs2, by = c("player_id", "season")) %>%
+  relocate(player_id, .after = last_col()) %>% 
+  relocate(nw_rk, .before = 1) %>% 
+  arrange(nw_rk)
+
+
+games %>% select(game_id, location, team, opp)
+
+week_1 <- games_21 %>% filter(week == 1) %>% select(location, team, opp)
+
+allowed_20 <- fpts_allowed %>% filter(season == 2020) %>% select(opp = opponent, position, per) %>% 
+  arrange(-per) %>% 
+  mutate(rk = 1:n())
+
+joined_qbs_week_1 <- overall_qbs3 %>% left_join(week_1, by = c("recent_team" = "team")) %>% left_join(allowed_20, by = c("opp", "position"))
+
+%>% 
+
+overall_qbs2 <-
+  weekly %>%
+  filter(position == "QB", n() > 1) %>%
+
+
+
+overall_qbs2 <-
+  overall %>%
+  filter(position == "QB") %>%
+  select(
+  ) %>%
+  arrange(-season, nw_rk)
+```
 
