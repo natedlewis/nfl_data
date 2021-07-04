@@ -2,7 +2,7 @@
 title: "NFL Data"
 author: "Nate Lewis"
 date: "2021-07-01"
-output: html_notebook
+output: github_document
 ---
 
 ```{r setup, echo=FALSE}
