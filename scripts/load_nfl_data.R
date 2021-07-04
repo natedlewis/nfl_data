@@ -1,3 +1,4 @@
+library(glue)
 # Helper functions ----
 clean_games <- function(g) {
   g1 <- games %>%
@@ -60,7 +61,13 @@ scrape_page <- function(page) {
 }
 # Rosters ----
 # Load raw roster data
-raw_rosters <- fast_scraper_roster(2010:2021)
+raw_rosters <- fast_scraper_roster(2010:2021) %>%
+  mutate(nw_position = case_when(
+    position == 'TE' | position == 'WR' ~ 'WR/TE',
+    position == 'FB' ~ 'RB',
+    TRUE ~ position
+  )
+)
 
 # Load dynastyprocess player ids
 raw_dp_rosters <-
@@ -81,7 +88,7 @@ rosters <- raw_rosters %>%
     season,
     full_name,
     position,
-    depth_chart_position,
+    nw_position,
     birth_date,
     height,
     weight,
@@ -90,14 +97,7 @@ rosters <- raw_rosters %>%
     draft_round,
     draft_pick,
     status,
-    ends_with("_id", vars = NULL)
-  ) %>% mutate(
-    nw_position = case_when(
-      position == 'TE' | position == 'WR' ~ 'WR/TE',
-      position == 'FB' ~ 'RB',
-      TRUE ~ position
-    )
-  )
+    ends_with("_id", vars = NULL))
 
 # Games ----
 # Load games
@@ -145,6 +145,7 @@ cleaned_injuries <-
     gsis_id,
     season,
     week,
+    team_abbr,
     active_inactive,
     game_designation,
     started,
@@ -155,6 +156,7 @@ cleaned_injuries <-
   filter(!is.na(gsis_id)) %>%
   rename(player_id = gsis_id)
 
+cleaned_injuries_joined <- cleaned_injuries %>% left_join(games, by = c("season", "week", "team_abbr" = "home_team")) %>% unite(season, week, home_team, away_team)
 # Export ----
 write_csv(rosters, "rosters.csv")
 write_csv(cleaned_injuries, "injury_data.csv")

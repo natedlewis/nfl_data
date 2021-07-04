@@ -1,9 +1,0 @@
-Helpful keyboard shortcuts
-cmd + enter: run selected code
-cmd + shift + enter: run code chunk
-cmd + i: re-indent selected code
-cmd + shift + c: comment/uncomment several lines of code
-cmd + shift + d: duplicate line underneath
-set up your own shortcuts to do useful things like
-switch tabs
-jump up and down between code chunks
