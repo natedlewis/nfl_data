@@ -1,0 +1,184 @@
+---
+title: "NFL Data"
+author: "Nate Lewis"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load, message=FALSE, warning=FALSE}
+library("nflfastR")
+library("skimr")
+library("gt")
+library("tidyverse")
+```
+
+```{r import, include=FALSE}
+# from 'game-data.R'
+raw_weekly_data <- read_csv("./data_output/weekly_data.csv")
+raw_season_data <- read_csv("./data_output/season_data.csv")
+
+# from 'rosters.R'
+raw_rosters <- read_csv("./data_output/rosters.csv")
+
+# from 'player-stats.R'
+raw_weekly_stats <- read_csv("./data_output/weekly_joined.csv")
+raw_season_stats <- read_csv("./data_output/overall_joined.csv")
+
+# from 'games.R'
+raw_games <- read_csv("./data_output/games.csv")
+```
+
+```{r clean, include=FALSE}
+# weekly
+weekly_stats <-
+  raw_weekly_stats %>%
+  select(1:5, completions:fantasy_points_ppr, -player_name) %>%
+  arrange(-season, player_id, week)
+
+weekly_data <- raw_weekly_data %>% select(-recent_team)
+
+# overall
+season_stats <-
+  raw_season_stats %>%
+  select(1:5, completions:fantasy_points_ppr, nw_rk:std_rk_ovr, -player_name) %>%
+  arrange(-season, player_id)
+
+season_data <- raw_season_data %>% select(-games)
+
+# other
+rosters <- raw_rosters %>%
+  rename(player_id = gsis_id) %>%
+  mutate(fantasy_position = ifelse(position %in% c("QB", "WR", "TE", "RB", "FB"), position, NA)) %>%
+  select(
+    player_id,
+    season,
+    full_name,
+    position,
+    status,
+    years_exp:status,
+    fantasy_position,
+    depth_chart_position,
+    nw_position
+  ) %>%
+  filter(!is.na(fantasy_position)) %>%
+  arrange(-season, position, player_id)
+
+games <- raw_games %>% filter(season >= 2010) %>% arrange(-season)
+```
+
+```{r join, include=FALSE}
+# join and filter to fantasy relevant positions
+season <- season_stats %>%
+  left_join(
+    rosters, by = c("player_id", "season")
+  ) %>%
+  left_join(season_data, by = c("player_id", "season")) %>% 
+  filter(!is.na(fantasy_position))
+
+weekly <- weekly_stats %>%
+  left_join(
+    rosters, by = c("player_id", "season")
+  ) %>%
+  left_join(weekly_data, by = c("player_id", "season", "week")) %>% 
+  filter(!is.na(fantasy_position))
+
+# create id cols
+id_cols <- c("player_id", "season", "full_name", "recent_team", "position")
+
+# rearrange
+season <- season %>% select(id_cols, dplyr::everything()) %>% 
+  mutate(across(where(is.numeric), round, 2))
+weekly <- weekly %>% select(id_cols, dplyr::everything()) %>% 
+  relocate(week, .after = season) %>% 
+    mutate(across(where(is.numeric), round, 2))
+```
+
+## Datasets
+
+### Rosters
+
+The 'rosters' dataset provides fantasy relevant player data and ids of from 2010 to 2020. This dataset is primarily used to gather positional data to join with stats. The ids provided may also be utilized to further join outside data.
+```{r rosters}
+rosters
+```
+
+
+### Games
+
+The 'games' dataset provides game data and results from 2010 to 2020.
+```{r games}
+games
+```
+
+
+### Weekly
+
+The 'weekly' dataset provides weekly player stats, snaps, injury data, and further advanced metrics that will be added down the road. Each observation is unique by a player_id and game_id that unites the season, week, home team, and away team.
+
+```{r}
+weekly
+```
+
+
+### Season
+
+The 'season' dataset aggregates the 'weekly' dataset by season.
+
+```{r}
+season
+```
+
+
+## Usage
+
+
+### Season Averages
+```{r}
+season_avgs <-
+  weekly %>%
+  filter(n() > 1) %>%
+  group_by(player_id, season) %>%
+  summarise(across(
+    .cols = c(
+      completions:fantasy_points_ppr,
+      -(catch_rate:short_catch_rate),
+      total_snaps, offense_snaps, special_teams_snaps,
+    ),
+    .fns = mean,
+    na.rm = TRUE,
+    .names = "{.col}_pg"
+  )) %>%
+  mutate(across(where(is.numeric), round, 2))
+```
+
+
+### Quarterbacks
+
+```{r}
+season %>% 
+  filter(position == "QB", season == 2020) %>% 
+  select(nw_rk, id_cols, completions:int_tds, -player_id) %>% 
+  arrange(nw_rk)
+```
+
+
+### Running Backs
+```{r}
+season %>% 
+  filter(position == "RB", season == 2020) %>% 
+  select(nw_rk, id_cols, carries:rushing_tds_50, -player_id) %>% 
+  arrange(nw_rk)
+```
+
+
+
+
+##### 2021 Season
+
+```{r}
+# 2021 coaches
+games[1:32,] %>% select(season, team, team_coach)
+```

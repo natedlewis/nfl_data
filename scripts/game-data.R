@@ -3,7 +3,7 @@
 # some snap counts are wrong, this is where I need to use SQL
 
 # load initial data
-games <- read_csv("./data/game_data.csv")
+games <- read_csv("./data_output/games.csv")
 rosters <- read_csv("./data/rosters.csv")
 
 # helper functions
@@ -60,25 +60,15 @@ joined <- cleaned_injuries %>%
     started_bi = ifelse(started == "YES", 1, 0),
     active_bi = ifelse(active_inactive == "Active", 1, 0),
     healthy_bi = ifelse(game_designation == "Healthy", 1, 0),
-    any_snaps_bi = ifelse(total_snaps >= 1, 1, 0),
     qual_snaps_bi = ifelse(offense_snap_rate >= .5, 1, 0)
   ) %>%
+  rename(recent_team = team_abbr,
+         opponent = opp) %>% 
   ungroup()
 
 # weekly data ----
 weekly_data <- joined %>%
-  rename(recent_team = team_abbr,
-         opponent = opp) %>%
-  unite(col = score, team_score, opp_score, sep = "-") %>% 
-  select(
-    player_id,
-    season:offense_snap_rate,
-    opponent,
-    score,
-    location,
-    team_result:opp_coach,
-    game_id
-  )
+  select(-c(started_bi:qual_snaps_bi))
 
 # season data ----
 season_averages <- joined %>%  
@@ -101,9 +91,9 @@ season_totals <- joined %>%
          active_rate = active_bi / games,
          healthy_rate = healthy_bi / games,
          qual_snap_rate = qual_snaps_bi / games) %>% 
+  rename(started = started_bi) %>% 
   select(1:2, games, total_snaps, offense_snaps, special_teams_snaps, 
-         started = started_bi,
-         start_rate:qual_snap_rate)
+         started, start_rate:qual_snap_rate)
 
 season_data <- season_totals %>% left_join(season_averages, by = c("player_id", "season")) %>% 
   mutate(across(where(is.numeric), round, 2))
