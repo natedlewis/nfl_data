@@ -1,0 +1,18 @@
+notes:
+- merge game data with injury data for singular object
+- create number of games started, and games where snaps meets qualifying snap rate
+  # how do players with more snap rates during the back half of a season perform the following season? (ex. David Montgomery)
+  # can decreases in snap rates be attributed to corresponding decreasing variables (ex. catch_rate, targets)
+- how vital is a tier 1 QB in NW
+- find avg. fpts per weighted opportunity
+- find complementary QBs to draft
+  # could I have done this in the past? What would have been the result using historic adp
+  # would need historic projections, or strength of schedule to roughly estimate
+  # is it worth investing into two solid comp QBs or one big dawg?
+- how do good/bad NW teams perform the last couple weeks?
+- how important are 100+ yard games?
+  # any preds?
+- find 90+ yd games
+- how does a good defense affect nw scoring by postiion?
+  # I would guess more so in NW because big games are much less likely and floors are hit more often
+- make interactive markdown with Shiny framework
