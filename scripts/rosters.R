@@ -33,7 +33,6 @@ cleaned_rosters <- raw_rosters %>%
     season,
     full_name,
     position,
-    depth_chart_position,
     nw_position,
     side_of_ball,
     years_exp,
@@ -49,9 +48,6 @@ cleaned_rosters <- raw_rosters %>%
     everything()
   ) %>%
   arrange(-season, gsis_id)
-
-# offense only
-rosters_offense <- cleaned_rosters %>% filter(side_of_ball == "OFF")
 
 # export to data folder
 write_csv(cleaned_rosters, "./data/rosters.csv")
