@@ -20,17 +20,22 @@ raw_rosters <- raw_rosters %>%
 
 cleaned_rosters <- raw_rosters %>%
   filter(!is.na(position)) %>%
-  mutate(nw_position = case_when(
-    position == "TE" | position == "WR" ~ "WR/TE",
-    position == "FB" ~ "RB",
-    TRUE ~ position
-  )) %>%
+  mutate(
+    nw_position = case_when(
+      position == "TE" | position == "WR" ~ "WR/TE",
+      position == "FB" ~ "RB",
+      TRUE ~ position
+    ),
+    side_of_ball = ifelse(position %in% c("QB", "RB", "WR", "TE", "FB"), "OFF", "DEF")
+  ) %>%
   select(
+    gsis_id,
     season,
     full_name,
     position,
     depth_chart_position,
     nw_position,
+    side_of_ball,
     years_exp,
     birth_date,
     height,
@@ -40,9 +45,13 @@ cleaned_rosters <- raw_rosters %>%
     draft_round,
     draft_pick,
     status,
-    ends_with("_id", vars = NULL)
-  )
+    ends_with("_id", vars = NULL),
+    everything()
+  ) %>%
+  arrange(-season, gsis_id)
 
-# Export
-write_csv(raw_rosters, "raw_rosters.csv")
-write_csv(cleaned_rosters, "rosters.csv")
+# offense only
+rosters_offense <- cleaned_rosters %>% filter(side_of_ball == "OFF")
+
+# export to data folder
+write_csv(cleaned_rosters, "./data/rosters.csv")
